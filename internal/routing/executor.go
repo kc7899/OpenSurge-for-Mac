@@ -31,6 +31,9 @@ func (e *Executor) Apply(ctx context.Context, api Selector, version, expected st
 	if !d.Change {
 		return false, nil
 	}
+	if d.Target == "" {
+		return false, fmt.Errorf("empty selection target")
+	}
 	rev, err := api.Revision(ctx)
 	if err != nil {
 		return false, err

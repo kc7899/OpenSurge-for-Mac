@@ -8,9 +8,10 @@ import (
 // ProbeResult separates transport reachability from geographical verification.
 // A country-service error must not turn a working outlet into a failed outlet.
 type ProbeResult struct {
-	Reachable   bool
-	Country, IP string
-	DelayMS     int
+	InfrastructureError bool
+	Reachable           bool
+	Country, IP         string
+	DelayMS             int
 }
 type ProbeFunc func(context.Context, Candidate, int) ProbeResult
 
@@ -27,12 +28,12 @@ func Detect(ctx context.Context, c Candidate, version string, old Observation, n
 		return old
 	}
 	result := probe(ctx, c, 0)
-	if ctx.Err() != nil {
+	if ctx.Err() != nil || result.InfrastructureError {
 		return o
 	}
 	if !result.Reachable {
 		result = probe(ctx, c, 1)
-		if ctx.Err() != nil {
+		if ctx.Err() != nil || result.InfrastructureError {
 			return o
 		}
 	}
