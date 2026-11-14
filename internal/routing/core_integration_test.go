@@ -81,6 +81,7 @@ proxy-providers:
 proxy-groups:
   - {name: Stable, type: select, proxies: [REJECT], use: [source-a, source-b]}
 rules:
+  - IP-CIDR,127.0.0.1/32,DIRECT,no-resolve
   - DOMAIN,domestic.test,DIRECT
   - MATCH,Stable
 `, mixed, apiPort)
@@ -178,6 +179,17 @@ rules:
 		if resp.StatusCode < 400 {
 			t.Fatal("proxy traffic did not fail closed")
 		}
+	}
+	// The fail-closed proxy selector must leave independently matched direct
+	// traffic working. This proves rule isolation without host routing changes.
+	directResponse, directErr := traffic.Get(a.URL)
+	if directErr != nil {
+		t.Fatal("direct rule failed after proxy rejection")
+	}
+	_, _ = io.Copy(io.Discard, directResponse.Body)
+	_ = directResponse.Body.Close()
+	if directResponse.StatusCode != 200 || directResponse.Header.Get("X-Fixture-Source") != "subscription-a" {
+		t.Fatal("direct rule did not retain its route")
 	}
 	after, _ := os.ReadFile(path)
 	if string(after) != raw || cmd.Process.Pid != pid {
