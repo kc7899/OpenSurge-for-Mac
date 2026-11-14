@@ -221,8 +221,8 @@ func TestSourceRequestUsesMihomoCompatibleUserAgent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := request.Header.Get("User-Agent"); got != "clash.meta" {
-		t.Fatalf("User-Agent = %q, want clash.meta", got)
+	if got := request.Header.Get("User-Agent"); got != "mihomo/1.19.0" {
+		t.Fatalf("User-Agent = %q, want mihomo/1.19.0", got)
 	}
 }
 

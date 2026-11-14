@@ -24,7 +24,7 @@ import (
 
 const (
 	maxSourceSize   = 10 << 20
-	sourceUserAgent = "clash.meta"
+	sourceUserAgent = "mihomo/1.19.0"
 )
 
 func (s *Server) importURL(ctx context.Context, req SourceImportRequest) (Source, error) {
@@ -90,6 +90,9 @@ func safeDialContext(ctx context.Context, network, address string) (net.Conn, er
 	ips, err := net.DefaultResolver.LookupIP(ctx, "ip", host)
 	if err != nil {
 		return nil, err
+	}
+	if len(ips) == 0 {
+		return nil, fmt.Errorf("source host has no addresses")
 	}
 	for _, ip := range ips {
 		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsUnspecified() {
