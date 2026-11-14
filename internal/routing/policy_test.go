@@ -61,6 +61,7 @@ func TestStableFailover(t *testing.T) {
 			}
 			s.ScanComplete = false
 		}},
+		{"incomplete scan with candidate does not choose prematurely", "a", "scan_incomplete", false, func(p *Policy, s *Snapshot, n time.Time) { fail(s, "a"); s.ScanComplete = false }},
 		{"stale result ignored", "a", "current_status_unknown", false, func(p *Policy, s *Snapshot, n time.Time) {
 			o := s.Observations["a"]
 			o.Version = "old"
@@ -169,5 +170,41 @@ func TestExecutorNoRetryAndStaleGuard(t *testing.T) {
 	_, err = e.Apply(context.Background(), f, "v", "a", d)
 	if !errors.Is(err, ErrStale) || f.calls != 1 {
 		t.Fatal(err)
+	}
+}
+
+type blockingSelector struct {
+	fakeSelector
+	entered, release chan struct{}
+}
+
+func (f *blockingSelector) Select(ctx context.Context, s string) error {
+	close(f.entered)
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-f.release:
+	}
+	return f.fakeSelector.Select(ctx, s)
+}
+func TestExecutorSerializesConcurrentTriggers(t *testing.T) {
+	e := &Executor{}
+	f := &blockingSelector{fakeSelector: fakeSelector{version: "v", current: "a"}, entered: make(chan struct{}), release: make(chan struct{})}
+	done := make(chan error, 1)
+	go func() {
+		_, err := e.Apply(context.Background(), f, "v", "a", Decision{Target: "b", Change: true})
+		done <- err
+	}()
+	<-f.entered
+	_, err := e.Apply(context.Background(), f, "v", "a", Decision{Target: "c", Change: true})
+	if !errors.Is(err, ErrBusy) {
+		t.Fatal(err)
+	}
+	close(f.release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if f.calls != 1 || f.current != "b" {
+		t.Fatal(f.fakeSelector)
 	}
 }

@@ -283,6 +283,8 @@ func (s *Server) routes(auth func(http.Handler) http.Handler, local bool) http.H
 			w.Header().Set("Cache-Control", "no-store")
 			writeJSON(w, http.StatusOK, map[string]string{"mode": "local"})
 		})
+		mux.Handle("GET /api/v1/stable-routing", auth(http.HandlerFunc(s.handleStableSettings)))
+		mux.Handle("PUT /api/v1/stable-routing", auth(http.HandlerFunc(s.handleStableSettings)))
 		mux.Handle("GET /api/v1/lan-access", auth(http.HandlerFunc(s.lan.handleConfig)))
 		mux.Handle("PUT /api/v1/lan-access", auth(http.HandlerFunc(s.lan.handleConfig)))
 		mux.Handle("POST /api/v1/lan-access/password", auth(http.HandlerFunc(s.lan.handleResetPassword)))

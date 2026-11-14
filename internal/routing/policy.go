@@ -258,6 +258,12 @@ func Decide(p Policy, s Snapshot, now time.Time) Decision {
 		}
 		return keep("upstream_unknown")
 	}
+	if !s.ScanComplete {
+		if hard {
+			return Decision{Target: Reject, Reason: reason, Change: s.Current != Reject}
+		}
+		return keep("scan_incomplete")
+	}
 	order := OrderedSources(s.Sources, p.SourceOrder)
 	if found && !sources[current.SourceID].Quota.Exhausted(now) {
 		for i, src := range order {

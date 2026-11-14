@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"gopkg.in/yaml.v3"
 	"io"
 	"net"
 	"net/http"
@@ -235,4 +236,63 @@ func TestPrivateDevelopmentSubscriptions(t *testing.T) {
 		t.Fatal("private composed configuration failed core validation; diagnostic output withheld because it may contain credentials")
 	}
 	t.Logf("validated %d private sources and %d namespaced candidates; no gateway started", len(sources), len(graph.Candidates))
+}
+
+func TestPrivateDevelopmentExitProbes(t *testing.T) {
+	if os.Getenv("OPENSURGE_TEST_LIVE_EXITS") != "1" {
+		t.Skip("live exit probes not requested")
+	}
+	store := os.Getenv("OPENSURGE_TEST_SOURCE_STORE")
+	binary := os.Getenv("OPENSURGE_TEST_CORE")
+	if store == "" || binary == "" {
+		t.Fatal("private fixture paths required")
+	}
+	data, err := os.ReadFile(filepath.Join(store, "sources.json"))
+	if err != nil {
+		t.Fatal("cannot read fixture inventory")
+	}
+	var sources []struct {
+		ID           string
+		SnapshotPath string `json:"snapshot_path"`
+	}
+	if json.Unmarshal(data, &sources) != nil {
+		t.Fatal("invalid fixture inventory")
+	}
+	verified := 0
+	for index, source := range sources {
+		raw, err := os.ReadFile(source.SnapshotPath)
+		if err != nil {
+			t.Fatal("cannot read fixture")
+		}
+		var doc struct {
+			Proxies []map[string]any `yaml:"proxies"`
+		}
+		if yaml.Unmarshal(raw, &doc) != nil {
+			t.Fatal("invalid fixture")
+		}
+		var chosen map[string]any
+		for _, node := range doc.Proxies {
+			name, _ := node["name"].(string)
+			if strings.Contains(name, "美国") || strings.Contains(strings.ToUpper(name), "US-") {
+				chosen = node
+				break
+			}
+		}
+		if chosen == nil {
+			t.Fatalf("source %d has no US-name probe seed", index+1)
+		}
+		result, err := ProbeNode(context.Background(), binary, chosen, 0)
+		if err != nil {
+			t.Fatalf("source %d: isolated probe infrastructure failed", index+1)
+		}
+		if !result.Reachable || result.Country != "US" || result.IP == "" {
+			t.Logf("source %d: selected seed did not verify a US exit; candidate remains ineligible", index+1)
+			continue
+		}
+		verified++
+		t.Logf("source %d: HTTPS verified, country US, delay %d ms; private IP withheld", index+1, result.DelayMS)
+	}
+	if verified == 0 {
+		t.Fatal("no seed verified; investigate source/network without switching live egress")
+	}
 }
