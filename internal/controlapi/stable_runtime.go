@@ -1,0 +1,335 @@
+package controlapi
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"os"
+	"path/filepath"
+	"sync"
+	"time"
+
+	"gopkg.in/yaml.v3"
+	"open-mihomo-gateway/internal/config"
+	"open-mihomo-gateway/internal/mihomo"
+	"open-mihomo-gateway/internal/routing"
+)
+
+type stableRuntime struct {
+	upstream func(context.Context) bool
+	probe    routing.ProbeFunc
+	mu       sync.Mutex
+	monitor  routing.Monitor
+	wake     chan struct{}
+	state    stableStatus
+}
+type stableStatus struct {
+	UpdatedAt    time.Time                      `json:"updated_at"`
+	Mode         string                         `json:"mode"`
+	Message      string                         `json:"message"`
+	Current      string                         `json:"current"`
+	SourceID     string                         `json:"source_id,omitempty"`
+	Node         string                         `json:"node,omitempty"`
+	IP           string                         `json:"ip,omitempty"`
+	Country      string                         `json:"country,omitempty"`
+	LastSwitch   time.Time                      `json:"last_switch,omitempty"`
+	Reason       string                         `json:"reason,omitempty"`
+	Observations map[string]routing.Observation `json:"observations,omitempty"`
+	Quotas       map[string]routing.Quota       `json:"quotas,omitempty"`
+}
+
+func (c *stableRuntime) snapshot() stableStatus {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	raw, _ := json.Marshal(c.state)
+	var copy stableStatus
+	_ = json.Unmarshal(raw, &copy)
+	return copy
+}
+func (s *Server) saveStableStatus(status stableStatus) {
+	status.UpdatedAt = time.Now()
+	raw, err := json.Marshal(status)
+	if err != nil {
+		return
+	}
+	var copy stableStatus
+	if json.Unmarshal(raw, &copy) != nil {
+		return
+	}
+	s.stable.mu.Lock()
+	s.stable.state = copy
+	s.stable.mu.Unlock()
+	_ = writeAtomic(filepath.Join(s.store.Dir(), "stable-routing-state-v1.json"), raw, 0600)
+}
+func (s *Server) handleStableCheck(w http.ResponseWriter, r *http.Request) {
+	select {
+	case s.stable.wake <- struct{}{}:
+	default:
+	}
+	writeJSON(w, 202, map[string]string{"message": "已安排检查；健康线路保持当前选择"})
+}
+
+func (s *Server) monitorStableRouting(ctx context.Context) {
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	var state stableStatus
+	_ = readJSON(filepath.Join(s.store.Dir(), "stable-routing-state-v1.json"), &state)
+	if state.Quotas == nil {
+		state.Quotas = map[string]routing.Quota{}
+	}
+	next := time.Time{}
+	lastRevision := ""
+	for {
+		force := false
+		select {
+		case <-ctx.Done():
+			return
+		case <-s.stable.wake:
+			force = true
+		case <-ticker.C:
+		}
+		p, revision, err := s.loadStablePolicy()
+		if err != nil {
+			continue
+		}
+		if !p.Enabled {
+			if state.Mode != "disabled" {
+				state.Mode = "disabled"
+				state.Message = "自动切换已关闭，保持当前线路"
+				s.saveStableStatus(state)
+			}
+			continue
+		}
+		if !force && revision == lastRevision && time.Now().Before(next) {
+			continue
+		}
+		lastRevision = revision
+		next = time.Now().Add(time.Duration(p.HealthSeconds) * time.Second)
+		cycleCtx, cancel := context.WithTimeout(ctx, 150*time.Second)
+		state = s.stableCycle(cycleCtx, p, revision, state)
+		cancel()
+		s.saveStableStatus(state)
+	}
+}
+
+func (s *Server) stableIdentity() (config.Config, routing.Graph, string, error) {
+	cfg, err := config.LoadRuntime(s.configPath)
+	if err != nil {
+		return cfg, routing.Graph{}, "", fmt.Errorf("网络配置不可读取")
+	}
+	state, ok := currentBootRuntimeState(cfg)
+	if !ok || state.PIDMihomo == 0 {
+		return cfg, routing.Graph{}, "", fmt.Errorf("网关尚未运行；不会自动启动")
+	}
+	digest, err := config.MihomoProfileDigest(cfg)
+	if err != nil || digest != state.ProfileDigest {
+		return cfg, routing.Graph{}, "", fmt.Errorf("运行配置与草稿不同，等待显式应用")
+	}
+	var graph routing.Graph
+	if readJSON(filepath.Join(s.store.Dir(), "stable-routing-graphs", digest+".json"), &graph) != nil || graph.Version == "" {
+		return cfg, graph, "", fmt.Errorf("请先显式应用一次多订阅配置")
+	}
+	_, rev, err := s.loadStablePolicy()
+	if err != nil {
+		return cfg, graph, "", err
+	}
+	identity := fmt.Sprintf("%s:%s:%s:%d", graph.Version, rev, fileDigest(s.configPath), state.PIDMihomo)
+	return cfg, graph, identity, nil
+}
+
+type stableSelector struct {
+	s                 *Server
+	cfg               config.Config
+	version, expected string
+}
+
+func (a stableSelector) Revision(context.Context) (string, error) {
+	_, _, v, e := a.s.stableIdentity()
+	return v, e
+}
+func (a stableSelector) Current(ctx context.Context) (string, error) {
+	groups, err := a.s.fetchProxyGroups(ctx, a.cfg)
+	if err != nil {
+		return "", err
+	}
+	for _, g := range groups {
+		if g.Name == routing.GroupName {
+			return g.Selected, nil
+		}
+	}
+	return "", fmt.Errorf("多订阅选择组未应用")
+}
+func (a stableSelector) Select(ctx context.Context, target string) error {
+	if !a.s.lifecycleMu.TryLock() {
+		return routing.ErrBusy
+	}
+	defer a.s.lifecycleMu.Unlock()
+	v, err := a.Revision(ctx)
+	if err != nil || v != a.version {
+		return routing.ErrStale
+	}
+	current, err := a.Current(ctx)
+	if err != nil {
+		return err
+	}
+	if current != a.expected {
+		return routing.ErrStale
+	}
+	return mihomo.SelectProxyGroup(ctx, a.cfg, routing.GroupName, target)
+}
+
+func (s *Server) stableCycle(ctx context.Context, p routing.Policy, revision string, previous stableStatus) stableStatus {
+	cfg, graph, version, err := s.stableIdentity()
+	if err != nil {
+		previous.Mode = "pending"
+		previous.Message = err.Error()
+		return previous
+	}
+	selector := stableSelector{s: s, cfg: cfg, version: version}
+	current, err := selector.Current(ctx)
+	if err != nil {
+		previous.Mode = "unknown"
+		previous.Message = "无法读取核心选择，不切线、不重启"
+		return previous
+	}
+	selector.expected = current
+	raw, err := os.ReadFile(cfg.Mihomo.Profile)
+	if err != nil {
+		previous.Mode = "unknown"
+		previous.Message = "无法读取已应用的节点配置"
+		return previous
+	}
+	var doc struct {
+		Proxies []map[string]any `yaml:"proxies"`
+	}
+	if yaml.Unmarshal(raw, &doc) != nil {
+		previous.Mode = "unknown"
+		return previous
+	}
+	nodes := map[string]map[string]any{}
+	for _, node := range doc.Proxies {
+		name, _ := node["name"].(string)
+		nodes[name] = node
+	}
+	sources, err := s.stableSourceList()
+	if err != nil {
+		previous.Mode = "unknown"
+		return previous
+	}
+	if previous.Quotas == nil {
+		previous.Quotas = map[string]routing.Quota{}
+	}
+	for i := range sources {
+		q := previous.Quotas[sources[i].ID]
+		if time.Since(q.CheckedAt) >= time.Duration(p.QuotaSeconds)*time.Second {
+			fresh := s.stableQuota(ctx, sources[i].ID)
+			if fresh.Known || !fresh.ExpiresAt.IsZero() {
+				q = fresh
+			} else if !q.Known && q.ExpiresAt.IsZero() {
+				q = fresh
+			} else {
+				q.Error = fresh.Error
+			}
+			previous.Quotas[sources[i].ID] = q
+		}
+		sources[i].Quota = q
+	}
+	upstream := s.stable.upstream
+	if upstream == nil {
+		upstream = stableUpstreamReady
+	}
+	networkReady := upstream(ctx)
+	snapshot := routing.Snapshot{Version: version, Current: current, Sources: sources, Candidates: graph.Candidates, Observations: previous.Observations, NetworkReady: networkReady, ScanComplete: false}
+	result, err := s.stable.monitor.Check(ctx, p, snapshot, selector, func(probeCtx context.Context, c routing.Candidate, target int) routing.ProbeResult {
+		if s.stable.probe != nil {
+			return s.stable.probe(probeCtx, c, target)
+		}
+		node := nodes[c.ID]
+		if node == nil {
+			return routing.ProbeResult{InfrastructureError: true}
+		}
+		result, err := routing.ProbeNode(probeCtx, cfg.Mihomo.Binary, node, target)
+		if err != nil {
+			return routing.ProbeResult{InfrastructureError: true}
+		}
+		return result
+	})
+	previous.Current = current
+	previous.Mode = "active"
+	if err != nil {
+		previous.Mode = "unknown"
+		previous.Message = "本次检查未完成，未确认切换；稍后重试"
+		return previous
+	}
+	previous.Observations = result.Observations
+	previous.Reason = result.Decision.Reason
+	if result.Changed {
+		previous.Current = result.Decision.Target
+		previous.LastSwitch = time.Now()
+	}
+	previous.SourceID = ""
+	previous.Node = ""
+	previous.Country = ""
+	previous.IP = ""
+	for _, c := range graph.Candidates {
+		if c.ID == previous.Current {
+			previous.SourceID = c.SourceID
+			previous.Node = c.Name
+			o := result.Observations[c.ID]
+			previous.Country = o.Country
+			previous.IP = o.IP
+		}
+	}
+	previous.Message = "线路检查完成；可用时保持当前选择"
+	if previous.Current == routing.Reject {
+		previous.Mode = "waiting"
+		previous.Message = "无合格代理出口，等待恢复；直连规则继续生效"
+	}
+	return previous
+}
+func (s *Server) stableQuota(ctx context.Context, id string) routing.Quota {
+	unknown := routing.Quota{CheckedAt: time.Now(), Error: "额度未知"}
+	address, err := s.credentials.Get(ctx, id)
+	if err != nil {
+		return unknown
+	}
+	req, err := newSourceRequest(ctx, address)
+	if err != nil {
+		return unknown
+	}
+	transport := &http.Transport{DialContext: safeDialContext}
+	defer transport.CloseIdleConnections()
+	client := &http.Client{Timeout: 8 * time.Second, Transport: transport, CheckRedirect: func(r *http.Request, via []*http.Request) error {
+		if len(via) >= 3 || r.URL.Scheme != "https" {
+			return fmt.Errorf("unsafe redirect")
+		}
+		return nil
+	}}
+	resp, err := client.Do(req)
+	if err != nil {
+		return unknown
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		unknown.Error = fmt.Sprintf("订阅查询 HTTP %d，未判定为耗尽", resp.StatusCode)
+		return unknown
+	}
+	return routing.ParseQuota(resp.Header.Get("subscription-userinfo"), time.Now())
+}
+func stableUpstreamReady(ctx context.Context) bool {
+	transport := &http.Transport{}
+	defer transport.CloseIdleConnections()
+	client := &http.Client{Transport: transport, Timeout: 3 * time.Second}
+	for _, target := range []string{"https://www.baidu.com/", "https://www.qq.com/"} {
+		req, _ := http.NewRequestWithContext(ctx, http.MethodHead, target, nil)
+		resp, err := client.Do(req)
+		if err == nil {
+			_ = resp.Body.Close()
+			if resp.StatusCode >= 200 && resp.StatusCode < 400 {
+				return true
+			}
+		}
+	}
+	return false
+}

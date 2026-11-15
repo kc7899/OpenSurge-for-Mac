@@ -360,6 +360,7 @@ type Operation struct {
 }
 
 type Source struct {
+	CompositionPending  bool            `json:"composition_pending"`
 	SchemaVersion       int             `json:"schema_version"`
 	ID                  string          `json:"id"`
 	Name                string          `json:"name"`

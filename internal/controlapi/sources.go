@@ -223,6 +223,7 @@ func (s *Server) decorateSourceStates(sources []Source) []Source {
 		}
 		result[i].Desired = desiredSource != "" && result[i].Digest == desiredSource
 		result[i].Applied = result[i].Desired && desiredProfile != "" && desiredProfile == appliedProfile
+		result[i].CompositionPending = result[i].Desired && result[i].EffectiveDigest != "" && result[i].EffectiveDigest != desiredProfile
 		for j := range result[i].Versions {
 			result[i].Versions[j].Desired = desiredSource != "" && result[i].Versions[j].Digest == desiredSource
 			result[i].Versions[j].Applied = result[i].Versions[j].Desired && desiredProfile != "" && desiredProfile == appliedProfile

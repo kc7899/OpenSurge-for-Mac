@@ -4,6 +4,7 @@ import { api } from '../api'
 import { copyText } from '../desktop'
 import { Empty, PageHeader, SectionTitle } from '../components/Common'
 import type { OperationNotification } from '../components/OperationNotifications'
+import { StableRoutingCard } from '../components/StableRoutingCard'
 import { TailscaleCard } from '../components/TailscaleCard'
 import { ProfileOverlayPanel } from '../components/ProfileOverlayPanel'
 import { CustomDNSCard } from '../components/CustomDNSCard'
@@ -172,6 +173,7 @@ export function SourcesPage({ overview, onChanged, onNotify, onOpenNetwork, onDi
   return <>
     <PageHeader eyebrow="SOURCES" title="代理与规则源" description="导入、校验、应用各自有明确状态；运行配置只会在完整校验成功后切换。" />
     {loadError && <div className="notice warn source-load-error" role="alert"><div><strong>{t('来源列表未能更新')}</strong><p>{loadError}</p></div><button type="button" disabled={busy} onClick={() => void refresh()}>{t('重试')}</button></div>}
+    <StableRoutingCard onSaved={() => void refreshSourceList()} />
     <TailscaleCard onChanged={onChanged} onNotify={onNotify} />
     <section className="section source-import-panel" aria-busy={activeAction?.kind === 'import-url' || activeAction?.kind === 'import-file'}>
       <SectionTitle title="添加配置来源" subtitle="导入只产生草稿，不会立即改变正在运行的 DHCP、DNS、TUN 或策略。" />
@@ -244,7 +246,7 @@ export function SourcesPage({ overview, onChanged, onNotify, onOpenNetwork, onDi
         const inUse = source.desired || source.applied || versions.some(version => version.desired || version.applied)
         const changed = diff?.previous_digest && diff.previous_digest !== source.digest
 		const overlayCompatible = source.overlay_compatible !== false
-		const sourceNeedsDrafts = (source.applied || source.desired) && draftsNeedApply
+		const sourceNeedsDrafts = (source.applied || source.desired) && (draftsNeedApply || source.composition_pending)
 		const state = t(sourceNeedsDrafts ? dnsNeedsApply ? overlayNeedsApply ? '附加配置与 DNS 待应用' : '自定义 DNS 待应用' : '附加配置待应用' : source.applied ? '运行版本' : source.desired ? running ? '待重载' : '下次启动版本' : previousApplied ? '新草稿' : source.valid && overlayCompatible ? '结构有效' : '存在冲突')
 		const action = t(sourceNeedsDrafts ? dnsNeedsApply ? running ? '应用配置与 DNS 并重载' : '保存配置与 DNS 到下次启动' : running ? '应用附加配置并重载' : '保存附加配置到下次启动' : source.applied ? '已运行' : source.desired ? running ? '应用并重载网关' : '等待下次启动' : running ? '校验、应用并重载' : '设为下次启动版本')
         const refreshing = activeAction?.kind === 'refresh' && activeAction.sourceID === source.id

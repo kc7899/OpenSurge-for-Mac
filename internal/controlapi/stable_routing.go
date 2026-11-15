@@ -16,6 +16,7 @@ import (
 const stableSettingsFile = "stable-routing-settings-v1.json"
 
 type stableSettingsResponse struct {
+	State    stableStatus     `json:"state"`
 	Policy   routing.Policy   `json:"policy"`
 	Revision string           `json:"revision"`
 	Sources  []routing.Source `json:"sources"`
@@ -112,7 +113,7 @@ func (s *Server) handleStableSettings(w http.ResponseWriter, r *http.Request) {
 		revision = mihomo.ProfileOverlayDigest(raw)
 	}
 	w.Header().Set("ETag", `"`+revision+`"`)
-	writeJSON(w, 200, stableSettingsResponse{Policy: p, Revision: revision, Sources: routing.OrderedSources(sources, p.SourceOrder), Message: "Settings saved as a draft. Multi-source graph changes require explicit profile application; saving never reloads the gateway."})
+	writeJSON(w, 200, stableSettingsResponse{State: s.stable.snapshot(), Policy: p, Revision: revision, Sources: routing.OrderedSources(sources, p.SourceOrder), Message: "设置已保存；首次启用或订阅内容变化后，请应用一次订阅配置。日常检测不会重载网关。"})
 }
 
 func (s *Server) composeStableSources(composition mihomo.ProfileOverlayComposition) (mihomo.ProfileOverlayComposition, error) {
