@@ -32,8 +32,8 @@ func TestComposeNamespacesAndPreservesRouting(t *testing.T) {
 	}
 	inputs[0].Source.Name = "renamed"
 	_, g2, err = Compose(base, inputs)
-	if err != nil || g.Version != g2.Version {
-		t.Fatal("rename changed graph")
+	if err != nil || g.Candidates[0].ID != g2.Candidates[0].ID {
+		t.Fatal("rename changed node identity")
 	}
 	inputs[0].YAML = []byte("proxy-providers: {remote: {type: http}}")
 	if _, _, err = Compose(base, inputs); err == nil {

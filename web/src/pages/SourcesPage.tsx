@@ -84,9 +84,10 @@ export function SourcesPage({ overview, onChanged, onNotify, onOpenNetwork, onDi
   const run = async (action: Exclude<SourceAction, null>, operation: () => Promise<unknown>, successMessage: string) => {
     setActiveAction(action)
     try {
-      await operation()
+      const outcome = await operation()
+      const poolUpdate = action.kind === 'refresh' && outcome && typeof outcome === 'object' && 'pool_update' in outcome ? String(outcome.pool_update ?? '') : ''
       await refresh()
-      onNotify({ tone: 'success', title: t(action.kind === 'refresh' ? '草稿已刷新' : '草稿已导入'), message: successMessage })
+      onNotify({ tone: 'success', title: t(action.kind === 'refresh' ? '订阅已刷新' : '草稿已导入'), message: poolUpdate || successMessage })
     } catch (cause) {
       onNotify({ tone: 'error', title: t('操作未完成'), message: cause instanceof Error ? cause.message : String(cause) })
     } finally {
@@ -234,7 +235,7 @@ export function SourcesPage({ overview, onChanged, onNotify, onOpenNetwork, onDi
       </div>
     </section>
     <section className="section source-library">
-      <SectionTitle title="已导入快照" subtitle="刷新只产生新草稿；应用到运行中的网关需要再次完整校验。" />
+      <SectionTitle title="已导入快照" subtitle="刷新会更新订阅快照；动态节点池同步新增与删除节点，旧配置会提示迁移。" />
       {sources.length ? <div className="source-grid">{sources.map(source => {
         const versions = source.versions ?? []
         const inventory = source.effective_inventory ?? source.inventory
@@ -255,6 +256,7 @@ export function SourcesPage({ overview, onChanged, onNotify, onOpenNetwork, onDi
         const exporting = activeAction?.kind === 'export' && activeAction.sourceID === source.id
         return <article className="source-card" key={source.id}>
           <div className="source-head"><div><small>{source.kind}</small><h3>{source.name}</h3></div><span className={sourceNeedsDrafts ? 'pill' : source.applied ? 'pill ok' : source.desired ? 'pill' : source.valid ? 'pill ok' : 'pill bad'}>{state}</span></div>
+          {source.pool_current && <p className="muted">{t('运行节点已同步；分流配置仍以已应用版本为准。')}</p>}
           <p className="source-origin" title={origin}><span aria-hidden="true">⌁</span>{origin}</p>
           {!isLANBrowser() && source.snapshot_display_path && <div className="source-location">
             <span className="source-location-icon" aria-hidden="true">▤</span>
@@ -281,7 +283,7 @@ export function SourcesPage({ overview, onChanged, onNotify, onOpenNetwork, onDi
 		  {versions.length > 0 && <small className="source-history">{t('历史：')}{versions.slice(-3).map(version => `${version.digest.slice(0, 8)}${version.applied ? ` (${t('运行')})` : version.desired ? ` (${t('待应用')})` : ''}`).join(' · ')}</small>}
 		  <div className="source-actions">
 			<button className="danger" type="button" disabled={busy || inUse || !revision} aria-label={t('删除来源 {{name}}', { name: source.name })} onClick={() => { setPending(null); setPendingDelete(source); setDeleteError('') }}>{t('删除来源')}</button>
-			{origin.startsWith('https://') && <button type="button" disabled={busy} onClick={() => void run({ kind: 'refresh', sourceID: source.id }, () => api.refreshSource(source.id), t('{{name}} 已刷新；新内容已保存为草稿。', { name: source.name }))}><ActionLabel active={refreshing} idle="刷新草稿" pending="正在刷新…" /></button>}
+			{origin.startsWith('https://') && <button type="button" disabled={busy} onClick={() => void run({ kind: 'refresh', sourceID: source.id }, () => api.refreshSource(source.id), t('{{name}} 已刷新；新内容已保存为草稿。', { name: source.name }))}><ActionLabel active={refreshing} idle="刷新订阅" pending="正在刷新…" /></button>}
 			<button className="primary" type="button" disabled={busy || dnsDirty || Boolean(dnsLoadError) || !customDNS || !revision || !source.valid || !overlayCompatible || (source.applied && !sourceNeedsDrafts) || (source.desired && !running && !sourceNeedsDrafts)} onClick={() => openApply(source)}>{action}</button>
             {dnsDirty && <small>{t('请先保存自定义 DNS 草稿，再应用配置。')}</small>}
           </div>

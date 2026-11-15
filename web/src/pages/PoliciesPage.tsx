@@ -49,7 +49,7 @@ export function PoliciesPage({ overview, onChanged, viewState, onViewStateChange
     if (scope === 'global' && device) return false
     if (scope === 'device' && !device) return false
     const query = search.trim().toLowerCase()
-    return !query || group.name.toLowerCase().includes(query) || policyDisplayName(group.name, byName.get(group.name)).toLowerCase().includes(query) || group.options.some(option => option.toLowerCase().includes(query))
+    return !query || group.name.toLowerCase().includes(query) || policyDisplayName(group.name, byName.get(group.name)).toLowerCase().includes(query) || group.options.some(option => option.toLowerCase().includes(query) || policyDisplayName(option, byName.get(option)).toLowerCase().includes(query))
   }), [groups, scope, search, byName])
   const groupNames = useMemo(() => filteredGroups.map(group => group.name), [filteredGroups])
   const visibleNames = useMemo(() => [...new Set(filteredGroups.flatMap(group => group.options))], [filteredGroups])

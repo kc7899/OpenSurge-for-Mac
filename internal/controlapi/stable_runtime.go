@@ -10,7 +10,6 @@ import (
 	"sync"
 	"time"
 
-	"gopkg.in/yaml.v3"
 	"open-mihomo-gateway/internal/config"
 	"open-mihomo-gateway/internal/mihomo"
 	"open-mihomo-gateway/internal/routing"
@@ -126,8 +125,13 @@ func (s *Server) stableIdentity() (config.Config, routing.Graph, string, error) 
 	if err != nil || digest != state.ProfileDigest {
 		return cfg, routing.Graph{}, "", fmt.Errorf("运行配置与草稿不同，等待显式应用")
 	}
-	var graph routing.Graph
-	if readJSON(filepath.Join(s.store.Dir(), "stable-routing-graphs", digest+".json"), &graph) != nil || graph.Version == "" {
+	raw, err := os.ReadFile(cfg.Mihomo.Profile)
+	if err != nil {
+		return cfg, routing.Graph{}, "", err
+	}
+	pool, err := routing.ReadPool(raw, filepath.Dir(cfg.Mihomo.Profile))
+	graph := pool.Graph
+	if err != nil || graph.Version == "" {
 		return cfg, graph, "", fmt.Errorf("请先显式应用一次多订阅配置")
 	}
 	_, rev, err := s.loadStablePolicy()
@@ -200,15 +204,14 @@ func (s *Server) stableCycle(ctx context.Context, p routing.Policy, revision str
 		previous.Message = "无法读取已应用的节点配置"
 		return previous
 	}
-	var doc struct {
-		Proxies []map[string]any `yaml:"proxies"`
-	}
-	if yaml.Unmarshal(raw, &doc) != nil {
+	pool, err := routing.ReadPool(raw, filepath.Dir(cfg.Mihomo.Profile))
+	if err != nil {
 		previous.Mode = "unknown"
+		previous.Message = "无法读取运行节点池"
 		return previous
 	}
 	nodes := map[string]map[string]any{}
-	for _, node := range doc.Proxies {
+	for _, node := range pool.Proxies {
 		name, _ := node["name"].(string)
 		nodes[name] = node
 	}
@@ -280,6 +283,16 @@ func (s *Server) stableCycle(ctx context.Context, p routing.Policy, revision str
 			previous.Country = o.Country
 			previous.IP = o.IP
 		}
+	}
+	retired := false
+	for _, c := range pool.Graph.Candidates {
+		if c.Retiring && c.ID != previous.Current {
+			retired = true
+		}
+	}
+	if retired && ctx.Err() == nil && s.sourcesMu.TryLock() {
+		_, _ = s.refreshStablePool(ctx)
+		s.sourcesMu.Unlock()
 	}
 	previous.Message = "线路检查完成；可用时保持当前选择"
 	if previous.Current == routing.Reject {

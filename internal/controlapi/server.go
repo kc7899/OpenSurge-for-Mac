@@ -1694,6 +1694,13 @@ func (s *Server) handleSourceRefresh(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "source_refresh_failed", err.Error())
 		return
 	}
+	if refreshed.Valid {
+		if updated, poolErr := s.refreshStablePool(r.Context()); poolErr != nil {
+			refreshed.PoolUpdate = "订阅草稿已更新，运行节点池待应用：" + poolErr.Error()
+		} else if updated {
+			refreshed.PoolUpdate = "运行节点列表已更新；仍有效的当前线路保持不变"
+		}
+	}
 	refreshed.SnapshotPath = ""
 	refreshed.FetchURL = ""
 	writeJSON(w, http.StatusOK, refreshed)

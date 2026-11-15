@@ -360,6 +360,8 @@ type Operation struct {
 }
 
 type Source struct {
+	PoolCurrent         bool            `json:"pool_current"`
+	PoolUpdate          string          `json:"pool_update,omitempty"`
 	CompositionPending  bool            `json:"composition_pending"`
 	SchemaVersion       int             `json:"schema_version"`
 	ID                  string          `json:"id"`

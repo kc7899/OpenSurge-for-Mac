@@ -38,7 +38,6 @@ func Compose(base []byte, inputs []Input) ([]byte, Graph, error) {
 	}
 	graph := Graph{Candidates: []Candidate{}}
 	nodes := []any{}
-	names := []string{"REJECT"}
 	seen := map[string]bool{}
 	sources := map[string]bool{}
 	for _, input := range inputs {
@@ -77,16 +76,15 @@ func Compose(base []byte, inputs []Input) ([]byte, Graph, error) {
 				return nil, Graph{}, err
 			}
 			digest := sha256.Sum256(raw)
-			identity := sha256.Sum256([]byte(input.Source.ID + "\x00" + name))
+			identity := sha256.Sum256([]byte(input.Source.ID + "\x00" + name + "\x00" + hex.EncodeToString(digest[:])))
 			id := "stable-" + hex.EncodeToString(identity[:16])
 			if seen[id] {
 				return nil, Graph{}, fmt.Errorf("duplicate node identity")
 			}
 			seen[id] = true
-			graph.Candidates = append(graph.Candidates, Candidate{ID: id, SourceID: input.Source.ID, Name: name, Fingerprint: hex.EncodeToString(digest[:])})
+			graph.Candidates = append(graph.Candidates, Candidate{ID: id, SourceName: input.Source.Name, SourceID: input.Source.ID, Name: name, Fingerprint: hex.EncodeToString(digest[:])})
 			node["name"] = id
 			nodes = append(nodes, node)
-			names = append(names, id)
 		}
 	}
 	if len(graph.Candidates) == 0 {
@@ -128,16 +126,11 @@ func Compose(base []byte, inputs []Input) ([]byte, Graph, error) {
 			aliases = append(aliases, map[string]any{"name": name, "type": "select", "proxies": []string{GroupName}})
 		}
 	}
-	aliases = append(aliases, map[string]any{"name": GroupName, "type": "select", "proxies": names})
-	root["proxies"] = nodes
+	aliases = append(aliases, map[string]any{"name": GroupName, "type": "select", "proxies": []string{"REJECT"}, "use": []string{PoolName}})
+	root["proxies"] = []any{}
 	root["proxy-groups"] = aliases
-	delete(root, "proxy-providers")
-	graphRaw, err := yaml.Marshal(graph.Candidates)
-	if err != nil {
-		return nil, Graph{}, err
-	}
-	sum := sha256.Sum256(graphRaw)
-	graph.Version = hex.EncodeToString(sum[:])
+	graph.Version = PoolVersion(graph.Candidates)
+	root["proxy-providers"] = map[string]any{PoolName: map[string]any{"type": "file", "path": "./stable-pool-" + graph.Version + ".yaml", "payload": nodes, "health-check": map[string]any{"enable": false}}}
 	root[graphMetadata] = graph
 	out, err := yaml.Marshal(root)
 	return out, graph, err

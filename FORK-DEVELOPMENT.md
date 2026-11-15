@@ -8,7 +8,7 @@
 - 上游：`https://github.com/YTwsy/OpenSurge-for-Mac.git`
 - 基线：`a05aa1f2c3cae45578991f2f912d049a0f36e17e`，上游 master 的 v0.3.3 发布合并提交。
 - 研发分支：`development/stable-gateway`。
-- 已提供 0.3.4-rc.1 arm64 本地研发预览安装包，已接通稳定选线后台及共享界面；整套功能尚未完成，未创建正式 GitHub Release。实际范围见 [研发进度](docs/agent-wiki/sources/stable-development-progress.md)。
+- 已提供 0.3.4-rc.2 arm64 本地研发预览安装包，已接通稳定选线后台、共享界面、原始节点名与订阅节点池热更新；整套功能尚未完成，未创建正式 GitHub Release。实际范围见 [研发进度](docs/agent-wiki/sources/stable-development-progress.md)。
 - 旧实验实现不整体迁入；兼容修复、UI 和测试经逐项审查后分别迁移。
 
 ## 本轮范围

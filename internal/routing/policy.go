@@ -171,6 +171,8 @@ func ReconcileOrder(sources []Source, order []string) []string {
 }
 
 type Candidate struct {
+	SourceName  string `json:"source_name,omitempty" yaml:"source_name,omitempty"`
+	Retiring    bool   `json:"retiring,omitempty" yaml:"retiring,omitempty"`
 	ID          string `json:"id"`
 	SourceID    string `json:"source_id"`
 	Fingerprint string `json:"fingerprint"`
@@ -237,6 +239,8 @@ func Decide(p Policy, s Snapshot, now time.Time) Decision {
 		src, exists := sources[current.SourceID]
 		o := s.Observations[current.ID]
 		switch {
+		case current.Retiring:
+			reason = "node_removed"
 		case exists && src.Quota.Exhausted(now):
 			reason = "quota_exhausted_or_expired"
 		case fresh(o, current, s, p, now) && o.Country != "" && !allowed(o, p):
@@ -251,7 +255,7 @@ func Decide(p Policy, s Snapshot, now time.Time) Decision {
 	}
 	// Region prohibition and positive exhaustion evidence must fail closed even
 	// when upstream evidence is unavailable; never retain a prohibited outlet.
-	hard := reason == "region_disallowed" || reason == "quota_exhausted_or_expired"
+	hard := reason == "region_disallowed" || reason == "quota_exhausted_or_expired" || reason == "node_removed"
 	if !s.NetworkReady {
 		if hard {
 			return Decision{Target: Reject, Reason: reason, Change: s.Current != Reject}
@@ -286,7 +290,7 @@ func Decide(p Policy, s Snapshot, now time.Time) Decision {
 			for i := range s.Candidates {
 				c := &s.Candidates[i]
 				o := s.Observations[c.ID]
-				if c.SourceID != src.ID || c.ID == s.Current || !fresh(o, *c, s, p, now) || !o.Healthy || !allowed(o, p) || o.Country != country || now.Before(o.RetryAt) {
+				if c.Retiring || c.SourceID != src.ID || c.ID == s.Current || !fresh(o, *c, s, p, now) || !o.Healthy || !allowed(o, p) || o.Country != country || now.Before(o.RetryAt) {
 					continue
 				}
 				if !o.RetryAt.IsZero() && o.Successes < 2 {

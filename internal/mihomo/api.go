@@ -370,6 +370,7 @@ func fetchProxyHealthWithClient(ctx context.Context, cfg config.Config, client *
 		return ProxyHealthSnapshot{}, err
 	}
 
+	labels := stablePolicyNames(cfg)
 	proxies := make([]ProxyHealth, 0, len(body.Proxies))
 	for name, proxy := range body.Proxies {
 		if proxy.Name == "" {
@@ -383,6 +384,9 @@ func fetchProxyHealthWithClient(ctx context.Context, cfg config.Config, client *
 			UDP:       proxy.UDP,
 			Status:    "untested",
 			Probeable: proxyIsProbeable(proxy.Type),
+		}
+		if label := labels[health.Name]; label != "" {
+			health.DisplayName = label
 		}
 		if health.Name == config.TailscaleProxyName && cfg.Tailscale.Enabled {
 			health.DisplayName = cfg.Tailscale.DisplayName

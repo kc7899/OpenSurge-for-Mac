@@ -171,6 +171,36 @@ rules:
 			t.Fatalf("probe changed selection: %s %v", data, e)
 		}
 	}
+	// Refresh a provider while a different, still-valid node is selected.
+	if _, code, e := request("PUT", "/proxies/Stable", `{"name":"source-b/node"}`); e != nil || code != 204 {
+		t.Fatal("prepare provider update")
+	}
+	updatedProvider := fmt.Sprintf("proxies: [{name: 'source-a/new', type: http, server: '%s', port: %s}]\n", ah, ap)
+	if os.WriteFile(filepath.Join(dir, "a.yaml"), []byte(updatedProvider), 0600) != nil {
+		t.Fatal("write updated provider")
+	}
+	if _, code, e := request("PUT", "/providers/proxies/source-a", ""); e != nil || code != 204 {
+		t.Fatal("provider update failed")
+	}
+	data, _, e := request("GET", "/proxies/Stable", "")
+	if e != nil {
+		t.Fatal(e)
+	}
+	var updatedGroup struct {
+		Now string   `json:"now"`
+		All []string `json:"all"`
+	}
+	if json.Unmarshal(data, &updatedGroup) != nil {
+		t.Fatal("invalid provider group")
+	}
+	members := strings.Join(updatedGroup.All, "|")
+	if updatedGroup.Now != "source-b/node" || !strings.Contains(members, "source-a/new") || strings.Contains(members, "source-a/node") {
+		t.Fatalf("provider list/selection not updated correctly: %s", data)
+	}
+	allProxies, _, e := request("GET", "/proxies", "")
+	if e != nil || !strings.Contains(string(allProxies), "source-a/new") {
+		t.Fatal("provider nodes missing from policy health inventory")
+	}
 	if _, code, e := request("PUT", "/proxies/Stable", `{"name":"REJECT"}`); e != nil || code != 204 {
 		t.Fatal("reject selection failed")
 	}
@@ -307,4 +337,176 @@ func TestPrivateDevelopmentExitProbes(t *testing.T) {
 	if verified == 0 {
 		t.Fatal("no seed verified; investigate source/network without switching live egress")
 	}
+}
+
+func TestManagedPoolFallbackAndRefreshRealCore(t *testing.T) {
+	binary := os.Getenv("OPENSURGE_TEST_CORE")
+	if binary == "" {
+		t.Skip("pinned core required")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	endpoint := func(body string) *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = io.WriteString(w, body) }))
+	}
+	a, b := endpoint("node-one"), endpoint("node-two")
+	defer a.Close()
+	defer b.Close()
+	makePool := func(includeOld bool) ([]byte, Pool) {
+		proxies := []map[string]any{}
+		for _, item := range []struct {
+			name, address string
+			include       bool
+		}{{"🇺🇸 US one", a.URL, includeOld}, {"🇯🇵 JP two", b.URL, true}} {
+			if !item.include {
+				continue
+			}
+			u, _ := url.Parse(item.address)
+			host, port, _ := net.SplitHostPort(u.Host)
+			proxies = append(proxies, map[string]any{"name": item.name, "type": "http", "server": host, "port": port})
+		}
+		raw, _ := yaml.Marshal(map[string]any{"proxies": proxies, "proxy-groups": []any{map[string]any{"name": "Proxy", "type": "select", "proxies": []string{proxies[0]["name"].(string)}}}, "rules": []string{"MATCH,Proxy"}})
+		result, _, err := Compose(raw, []Input{{Source: Source{ID: "source", Name: "任意订阅名称"}, YAML: raw}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		pool, err := ReadPool(result, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return result, pool
+	}
+	raw, initial := makePool(true)
+	// Start without a provider file: the embedded payload must provide the first
+	// usable graph before any subscription refresh has happened.
+	port := func() int {
+		l, e := net.Listen("tcp4", "127.0.0.1:0")
+		if e != nil {
+			t.Fatal(e)
+		}
+		p := l.Addr().(*net.TCPAddr).Port
+		_ = l.Close()
+		return p
+	}
+	apiPort, mixed := port(), port()
+	for apiPort == mixed {
+		mixed = port()
+	}
+	var configDoc map[string]any
+	if yaml.Unmarshal(raw, &configDoc) != nil {
+		t.Fatal("fixture")
+	}
+	configDoc["mixed-port"] = mixed
+	configDoc["bind-address"] = "127.0.0.1"
+	configDoc["allow-lan"] = false
+	configDoc["external-controller"] = fmt.Sprintf("127.0.0.1:%d", apiPort)
+	configDoc["secret"] = "pool-fixture"
+	configDoc["tun"] = map[string]any{"enable": false}
+	configDoc["dns"] = map[string]any{"enable": false}
+	configDoc["log-level"] = "silent"
+	raw, _ = yaml.Marshal(configDoc)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if os.WriteFile(path, raw, 0600) != nil {
+		t.Fatal("write fixture")
+	}
+	poolPath, err := PoolPath(raw, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.CommandContext(ctx, binary, "-d", dir, "-f", path)
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = cmd.Process.Kill(); _ = cmd.Wait() }()
+	pid := cmd.Process.Pid
+	client := &http.Client{Timeout: time.Second}
+	api := fmt.Sprintf("http://127.0.0.1:%d", apiPort)
+	call := func(method, path, body string) ([]byte, int, error) {
+		req, _ := http.NewRequestWithContext(ctx, method, api+path, strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer pool-fixture")
+		resp, e := client.Do(req)
+		if e != nil {
+			return nil, 0, e
+		}
+		defer resp.Body.Close()
+		data, e := io.ReadAll(resp.Body)
+		return data, resp.StatusCode, e
+	}
+	ready := false
+	for i := 0; i < 100; i++ {
+		if _, code, e := call("GET", "/version", ""); e == nil && code == 200 {
+			ready = true
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if !ready {
+		t.Fatal("core not ready")
+	}
+	readGroup := func() (string, []string) {
+		data, code, e := call("GET", "/proxies/"+url.PathEscape(GroupName), "")
+		if e != nil || code != 200 {
+			t.Fatal("read group")
+		}
+		var g struct {
+			Now string   `json:"now"`
+			All []string `json:"all"`
+		}
+		if json.Unmarshal(data, &g) != nil {
+			t.Fatal("group JSON")
+		}
+		return g.Now, g.All
+	}
+	choose := func(id string) {
+		if _, code, e := call("PUT", "/proxies/"+url.PathEscape(GroupName), fmt.Sprintf(`{"name":%q}`, id)); e != nil || code != 204 {
+			t.Fatal("select node")
+		}
+	}
+	update := func(pool Pool) {
+		data, _ := yaml.Marshal(pool)
+		if os.WriteFile(poolPath, data, 0600) != nil {
+			t.Fatal("pool file")
+		}
+		if _, code, e := call("PUT", "/providers/proxies/"+url.PathEscape(PoolName), ""); e != nil || code != 204 {
+			t.Fatal("provider update")
+		}
+	}
+	oldID, newID := initial.Graph.Candidates[0].ID, initial.Graph.Candidates[1].ID
+	_, members := readGroup()
+	if !strings.Contains(strings.Join(members, "|"), oldID) {
+		t.Fatal("fallback payload not loaded")
+	}
+	choose(oldID)
+	_, replacement := makePool(false)
+	retiring := RefreshPool(initial, replacement, oldID)
+	update(retiring)
+	selected, members := readGroup()
+	if selected != oldID || !strings.Contains(strings.Join(members, "|"), newID) {
+		t.Fatal("refresh unexpectedly displaced current outlet")
+	}
+	choose(newID)
+	update(RefreshPool(retiring, replacement, newID))
+	selected, members = readGroup()
+	if selected != newID || strings.Contains(strings.Join(members, "|"), oldID) {
+		t.Fatal("removed node still in pool after transition")
+	}
+	proxyURL, _ := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", mixed))
+	transport := &http.Transport{Proxy: http.ProxyURL(proxyURL)}
+	defer transport.CloseIdleConnections()
+	traffic := &http.Client{Transport: transport, Timeout: time.Second}
+	resp, err := traffic.Get("http://fixture.test/check")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if string(data) != "node-two" {
+		t.Fatal("replacement egress not in use")
+	}
+	after, _ := os.ReadFile(path)
+	if string(after) != string(raw) || cmd.Process.Pid != pid {
+		t.Fatal("profile or process changed")
+	}
+	t.Log("fallback startup, retained-current refresh, replacement selection and final deletion passed without gateway reload")
 }

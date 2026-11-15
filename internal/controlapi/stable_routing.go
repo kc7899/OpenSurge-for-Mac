@@ -139,7 +139,7 @@ func (s *Server) composeStableSources(composition mihomo.ProfileOverlayCompositi
 		}
 		inputs = append(inputs, routing.Input{Source: routing.Source{ID: source.ID, Name: source.Name}, YAML: data})
 	}
-	data, graph, err := routing.Compose([]byte(composition.ProfileYAML), inputs)
+	data, _, err := routing.Compose([]byte(composition.ProfileYAML), inputs)
 	if err != nil {
 		return composition, err
 	}
@@ -150,16 +150,5 @@ func (s *Server) composeStableSources(composition mihomo.ProfileOverlayCompositi
 	composition.ProfileYAML = string(data)
 	composition.Digest = mihomo.ProfileOverlayDigest(data)
 	composition.Inspection = inspection
-	raw, err := json.Marshal(graph)
-	if err != nil {
-		return composition, err
-	}
-	dir := filepath.Join(s.store.Dir(), "stable-routing-graphs")
-	if err = os.MkdirAll(dir, 0700); err != nil {
-		return composition, err
-	}
-	if err = writeAtomic(filepath.Join(dir, composition.Digest+".json"), raw, 0600); err != nil {
-		return composition, err
-	}
 	return composition, nil
 }

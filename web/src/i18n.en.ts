@@ -1,4 +1,10 @@
 export const englishMessages: Record<string, string> = {
+  '运行节点已同步；分流配置仍以已应用版本为准。': 'Running nodes are synchronized; routing rules retain the applied configuration.',
+  '订阅已刷新': 'Subscription refreshed',
+  '刷新订阅': 'Refresh subscription',
+
+  '刷新会更新订阅快照；动态节点池同步新增与删除节点，旧配置会提示迁移。': 'Refresh updates the snapshot and dynamic node pool; older configurations show a migration notice.',
+  '稳定优先自动出口': 'Stable automatic outlet',
   '稳定优先自动切换': 'Stable failover',
   '启用自动切换': 'Enable automatic failover',
   '当前线路可用就保持；确认故障、额度耗尽或地区不合规时才切换。': 'Keep a healthy outlet. Switch only after confirmed failure, exhausted quota or a disallowed region.',
