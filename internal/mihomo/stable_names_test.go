@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestStableNodesExposeOriginalNamesWithoutChangingSelectionKeys(t *testing.T) {
@@ -26,7 +27,17 @@ func TestStableNodesExposeOriginalNamesWithoutChangingSelectionKeys(t *testing.T
 		if r.Method != "GET" {
 			t.Error("presentation must not mutate core")
 		}
-		_, _ = w.Write([]byte(`{"proxies":{"` + g.Candidates[0].ID + `":{"type":"Trojan","udp":true}}}`))
+		switch r.URL.Path {
+		case "/proxies":
+			_, _ = w.Write([]byte(`{"proxies":{"Proxy":{"type":"Selector","all":["` + g.Candidates[0].ID + `"]}}}`))
+		case "/providers/proxies/" + routing.PoolName:
+			_, _ = w.Write([]byte(`{"proxies":[{"name":"` + g.Candidates[0].ID + `","type":"Trojan","udp":true,"alive":true}]}`))
+		case "/providers/proxies/" + routing.PoolName + "/" + g.Candidates[0].ID + "/healthcheck":
+			_, _ = w.Write([]byte(`{"delay":725}`))
+		default:
+			t.Error("unexpected endpoint", r.URL.Path)
+			http.NotFound(w, r)
+		}
 	}))
 	defer server.Close()
 	cfg := config.Default()
@@ -37,11 +48,32 @@ func TestStableNodesExposeOriginalNamesWithoutChangingSelectionKeys(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(health.Proxies) != 1 || health.Proxies[0].Name != g.Candidates[0].ID || health.Proxies[0].DisplayName != "🇺🇸 美国-US-1" {
+	var node ProxyHealth
+	for _, h := range health.Proxies {
+		if h.Name == g.Candidates[0].ID {
+			node = h
+		}
+	}
+	if node.DisplayName != "🇺🇸 美国-US-1" || !node.Probeable || node.Status != "untested" {
 		t.Fatal(health)
+	}
+	result := measureProxyDelayWithClient(context.Background(), cfg, server.Client(), node.Name, DefaultProxyDelayTestURL, 5*time.Second)
+	if result.Status != "reachable" || result.DelayMS != 725 {
+		t.Fatal("provider member was not measured through its own endpoint", result)
 	}
 	after, _ := os.ReadFile(path)
 	if string(after) != string(raw) {
 		t.Fatal("display read rewrote applied profile")
+	}
+}
+
+func TestMissingDelayEndpointIsNotNodeUnreachable(t *testing.T) {
+	server := httptest.NewServer(http.NotFoundHandler())
+	defer server.Close()
+	cfg := config.Default()
+	cfg.Mihomo.APIAddr = strings.TrimPrefix(server.URL, "http://")
+	result := measureProxyDelayWithClient(context.Background(), cfg, server.Client(), "removed-node", DefaultProxyDelayTestURL, time.Second)
+	if result.Status != "error" {
+		t.Fatal("HTTP 404 must remain an API error, not an outage", result)
 	}
 }

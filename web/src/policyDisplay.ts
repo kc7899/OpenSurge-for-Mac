@@ -7,6 +7,7 @@ export const TAILSCALE_EXIT_POLICY = 'open-surge/tailscale-exit'
 export function policyDisplayName(name: string, health?: ProxyHealthEntry, tailscaleDisplayName = '') {
   if (name === 'open-surge/stable-routing') return t('稳定优先自动出口')
   if (health?.display_name) return health.display_name
+  if (/^stable-[a-f0-9]{32}$/.test(name)) return t('节点信息暂不可用，请刷新')
   if (name === TAILSCALE_EXIT_POLICY) return tailscaleDisplayName ? `${tailscaleDisplayName} · Exit Node` : t('Tailscale Exit Node')
   if (name === TAILSCALE_POLICY) return tailscaleDisplayName || t('Tailscale 出口节点')
   return name

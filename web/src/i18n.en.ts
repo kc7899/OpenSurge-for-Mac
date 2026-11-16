@@ -4,6 +4,7 @@ export const englishMessages: Record<string, string> = {
   '刷新订阅': 'Refresh subscription',
 
   '刷新会更新订阅快照；动态节点池同步新增与删除节点，旧配置会提示迁移。': 'Refresh updates the snapshot and dynamic node pool; older configurations show a migration notice.',
+  '节点信息暂不可用，请刷新': 'Node information unavailable; refresh the view',
   '稳定优先自动出口': 'Stable automatic outlet',
   '稳定优先自动切换': 'Stable failover',
   '启用自动切换': 'Enable automatic failover',

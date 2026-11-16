@@ -14,3 +14,10 @@ it('shows original node country/name and selects by the unchanged internal ID', 
  fireEvent.click(screen.getByRole('button', { name: /选择.*美国-US-1/ }))
  await waitFor(() => expect(onSelect).toHaveBeenCalledWith(id))
 })
+
+it('does not show opaque runtime IDs when node metadata is unavailable', () => {
+ const id = 'stable-1234567890abcdef1234567890abcdef'
+ render(<PolicyGroupHealthCard group={{ name: 'open-surge/stable-routing', type: 'Selector', selected: id, options: [id] }} search="" healthByName={new Map()} testing={new Set()} onTest={async () => {}} onSelect={async () => {}} />)
+ expect(screen.queryByText(id)).toBeNull()
+ expect(screen.getAllByText('节点信息暂不可用，请刷新').length).toBeGreaterThan(0)
+})
