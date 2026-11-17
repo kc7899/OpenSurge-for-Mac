@@ -22,6 +22,10 @@ install -m 0755 "$CORE" "$STAGE/usr/lib/opensurge/mihomo"
 install -m 0644 packaging/linux/*.service "$STAGE/usr/lib/systemd/system/"
 for script in postinst prerm postrm; do install -m 0755 "packaging/linux/$script" "$STAGE/DEBIAN/$script"; done
 install -m 0644 LICENSE "$STAGE/usr/share/doc/opensurge-gateway/copyright"
+mkdir -p "$STAGE/usr/share/doc/opensurge-gateway/licenses"
+install -m 0644 third_party/licenses/* "$STAGE/usr/share/doc/opensurge-gateway/licenses/"
+install -m 0644 THIRD_PARTY_NOTICES.md "$STAGE/usr/share/doc/opensurge-gateway/THIRD_PARTY_NOTICES.md"
+install -m 0644 packaging/linux/THIRD-PARTY-NOTICES.md "$STAGE/usr/share/doc/opensurge-gateway/UBUNTU-NOTICES.md"
 install -m 0644 docs/ubuntu-install.md "$STAGE/usr/share/doc/opensurge-gateway/README.md"
 git rev-parse HEAD > "$STAGE/usr/share/doc/opensurge-gateway/source-commit"
 cat > "$STAGE/DEBIAN/control" <<EOF
@@ -38,6 +42,13 @@ Description: OpenSurge Ubuntu IPv4 gateway and Web console (preview)
  No gateway takeover on installation. Same-LAN IPv4 only.
 EOF
 dpkg-deb --root-owner-group --build "$STAGE" "$OUT/opensurge-gateway_${VERSION}_amd64.deb"
+install -m 0644 docs/ubuntu-install.md "$OUT/INSTALL.md"
+{
+ printf 'OpenSurge Ubuntu preview %s\nSource: ' "$VERSION"
+ git rev-parse HEAD
+ printf 'Repository: https://github.com/kc7899/OpenSurge-for-Mac\nMihomo: 1.19.33-opensurge.1 (pinned patched source)\n'
+ sha256sum "$CORE"
+} > "$OUT/BUILD-INFO.txt"
 cd "$OUT"
 sha256sum "opensurge-gateway_${VERSION}_amd64.deb" > SHA256SUMS
 echo "Package: $OUT/opensurge-gateway_${VERSION}_amd64.deb"

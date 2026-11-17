@@ -250,11 +250,15 @@ func TestCertificateFailoverThroughRealIsolatedCore(t *testing.T) {
 	for _, n := range pool.Proxies {
 		nodes[n["name"].(string)] = n
 	}
+	physical := "lo"
+	if _, err := net.InterfaceByName(physical); err != nil {
+		physical = "lo0"
+	}
 	probe := func(ctx context.Context, c Candidate, target int) ProbeResult {
 		if target != 2 {
 			return ProbeResult{Reachable: true, Country: "US", IP: "203.0.113.1", DelayMS: 10}
 		}
-		r, e := probeNodeWithServiceTrust(ctx, binary, nodes[c.ID], target, chatGPTTLSHosts, roots)
+		r, e := probeNodeWithServiceTrust(ctx, binary, nodes[c.ID], target, chatGPTTLSHosts, roots, ProbeNetwork{Interface: physical})
 		if e != nil {
 			return ProbeResult{InfrastructureError: true}
 		}

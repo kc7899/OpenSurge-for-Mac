@@ -11,8 +11,10 @@ import (
 	"time"
 
 	"open-mihomo-gateway/internal/config"
+	"open-mihomo-gateway/internal/macosnetwork"
 	"open-mihomo-gateway/internal/mihomo"
 	"open-mihomo-gateway/internal/routing"
+	runtimepkg "open-mihomo-gateway/internal/runtime"
 )
 
 type stableRuntime struct {
@@ -240,8 +242,17 @@ func (s *Server) stableCycle(ctx context.Context, p routing.Policy, revision str
 		sources[i].Quota = q
 	}
 	upstream := s.stable.upstream
+	network := routing.ProbeNetwork{Interface: cfg.Gateway.UpstreamInterface}
+	if state, exists, err := runtimepkg.LoadState(runtimepkg.NewPaths(cfg).StateFile); err == nil && exists && state.LocalSystemDNS != nil {
+		network.Resolvers = append([]string(nil), state.LocalSystemDNS.Resolvers...)
+	}
+	if len(network.Resolvers) == 0 && (s.stable.probe == nil || s.stable.upstream == nil) {
+		if info, err := macosnetwork.Discover(ctx, cfg.Gateway.UpstreamInterface, cfg.Gateway.UpstreamInterface); err == nil {
+			network.Resolvers = info.DNS
+		}
+	}
 	if upstream == nil {
-		upstream = stableUpstreamReady
+		upstream = func(ctx context.Context) bool { return routing.ProbeUpstream(ctx, cfg.Mihomo.Binary, network) }
 	}
 	networkReady := upstream(ctx)
 	snapshot := routing.Snapshot{Version: version, Current: current, Sources: sources, Candidates: graph.Candidates, Observations: previous.Observations, NetworkReady: networkReady, ScanComplete: false}
@@ -253,7 +264,7 @@ func (s *Server) stableCycle(ctx context.Context, p routing.Policy, revision str
 		if node == nil {
 			return routing.ProbeResult{InfrastructureError: true}
 		}
-		result, err := routing.ProbeNode(probeCtx, cfg.Mihomo.Binary, node, target)
+		result, err := routing.ProbeNodeWithNetwork(probeCtx, cfg.Mihomo.Binary, node, target, network)
 		if err != nil {
 			return routing.ProbeResult{InfrastructureError: true}
 		}
@@ -343,20 +354,4 @@ func (s *Server) stableQuota(ctx context.Context, id string) routing.Quota {
 		return unknown
 	}
 	return routing.ParseQuota(resp.Header.Get("subscription-userinfo"), time.Now())
-}
-func stableUpstreamReady(ctx context.Context) bool {
-	transport := &http.Transport{}
-	defer transport.CloseIdleConnections()
-	client := &http.Client{Transport: transport, Timeout: 3 * time.Second}
-	for _, target := range []string{"https://www.baidu.com/", "https://www.qq.com/"} {
-		req, _ := http.NewRequestWithContext(ctx, http.MethodHead, target, nil)
-		resp, err := client.Do(req)
-		if err == nil {
-			_ = resp.Body.Close()
-			if resp.StatusCode >= 200 && resp.StatusCode < 400 {
-				return true
-			}
-		}
-	}
-	return false
 }

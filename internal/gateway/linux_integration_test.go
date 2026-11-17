@@ -17,6 +17,7 @@ import (
 	"open-mihomo-gateway/internal/mihomo"
 	"open-mihomo-gateway/internal/pf"
 	"open-mihomo-gateway/internal/process"
+	"open-mihomo-gateway/internal/routing"
 	"open-mihomo-gateway/internal/runtime"
 	"open-mihomo-gateway/internal/sysctl"
 )
@@ -65,7 +66,8 @@ func TestUbuntuGatewayDataPlaneNamespace(t *testing.T) {
 	run("ip", "-n", "client", "addr", "add", "192.168.50.100/24", "dev", "eth0")
 	run("ip", "-n", "client", "route", "add", "default", "via", "192.168.50.212")
 	run("ip", "route", "add", "default", "via", "192.168.50.1")
-	fixtureCmd := exec.Command("ip", "netns", "exec", "router", "python3", fixture)
+	recordsPath := filepath.Join(t.TempDir(), "proxy-records")
+	fixtureCmd := exec.Command("ip", "netns", "exec", "router", "python3", fixture, recordsPath)
 	fixtureCmd.Stdout, fixtureCmd.Stderr = os.Stdout, os.Stderr
 	if err := fixtureCmd.Start(); err != nil {
 		t.Fatal(err)
@@ -168,6 +170,18 @@ rules:
 		t.Fatal(err)
 	}
 	get("direct.test", "via-direct")
+	// The live selector now rejects proxy traffic. An isolated probe of a
+	// PUBLIC-IP candidate must still reach it via the physical LAN interface.
+	recordsBefore, _ := os.ReadFile(recordsPath)
+	_, probeErr := routing.ProbeNodeWithNetwork(ctx, binary, map[string]any{"name": "physical-fixture", "type": "http", "server": "203.0.113.10", "port": 3129}, 2, routing.ProbeNetwork{Interface: "lan0", Resolvers: []string{"udp://192.168.50.1:5353"}})
+	if probeErr != nil {
+		t.Fatal("physical candidate probe infrastructure", probeErr)
+	}
+	recordsAfter, _ := os.ReadFile(recordsPath)
+	if strings.Count(string(recordsAfter), "via-B") <= strings.Count(string(recordsBefore), "via-B") {
+		t.Fatal("live REJECT selector captured candidate probe instead of physical uplink")
+	}
+
 	if out, e := exec.Command("ip", "netns", "exec", "client", "curl", "--noproxy", "*", "-fsS", "--max-time", "2", "--resolve", "proxy.test:80:"+dns, "http://proxy.test/").CombinedOutput(); e == nil {
 		t.Fatalf("empty proxy selection leaked: %s", out)
 	}

@@ -51,8 +51,13 @@ publish the raw control API or Mihomo controller to the Internet.
 - Per-link systemd-resolved DNS/domain settings are snapshotted and restored.
   Strict DNS-over-TLS/DNSSEC configurations are rejected rather than weakened;
   advanced administrators may disable host-DNS integration and configure a
-  compatible resolver path explicitly. Offline namespace tests do not certify
-  actual host-resolved operation.
+  compatible resolver path explicitly. Private-bus tests exercise the real
+  Ubuntu service; they do not certify every physical server/network setup.
+
+The `.deb` is an unsigned preview package. Verify its SHA256 against the
+published `SHA256SUMS`. IPv4 namespace tests and package lifecycle tests have
+passed; physical NICs, real household clients, IPv6 and a real Tailnet have not
+been certified. Do not transfer all clients before verifying one test client.
 
 ## Service operations, upgrade and recovery
 

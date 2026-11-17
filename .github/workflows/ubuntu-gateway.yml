@@ -93,3 +93,44 @@ jobs:
         with:
           name: opensurge-ubuntu-24.04-amd64-preview
           path: artifacts/ubuntu/*
+  publish:
+    needs: linux
+    if: github.repository == 'kc7899/OpenSurge-for-Mac' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'development/ubuntu-gateway'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    concurrency:
+      group: opensurge-ubuntu-preview-release
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Explicit release intent
+        id: intent
+        run: |
+          if git log -1 --format=%s | grep -Fq '[publish-ubuntu]'; then
+            echo 'publish=true' >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/download-artifact@v4
+        if: steps.intent.outputs.publish == 'true'
+        with:
+          name: opensurge-ubuntu-24.04-amd64-preview
+          path: dist
+      - name: Publish tested Ubuntu prerelease
+        if: steps.intent.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SOURCE_COMMIT: ${{ github.event.pull_request.head.sha }}
+        run: |
+          cd dist
+          sha256sum --check SHA256SUMS
+          cd ..
+          tag=v0.3.4-ubuntu.1
+          if gh release view "$tag" --json targetCommitish,isPrerelease > existing.json; then
+            python3 -c 'import json,os; r=json.load(open("existing.json")); assert r["targetCommitish"]==os.environ["SOURCE_COMMIT"] and r["isPrerelease"], "Release exists for another commit; increment the preview version. Existing assets were not changed."'
+            exit 0
+          fi
+          gh release create "$tag" dist/* --target "$SOURCE_COMMIT" --prerelease --latest=false --title 'OpenSurge Ubuntu 24.04 amd64 · IPv4 preview 1' --notes-file packaging/linux/RELEASE-NOTES.md

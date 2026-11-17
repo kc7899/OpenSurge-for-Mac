@@ -23,7 +23,7 @@
 ## 开发、验证与证据
 
 - 独立研发分支待实现方案：[稳定选线与设备接入](../sources/decisions/stable-routing-and-admission.md)；当前状态见 [研发说明](../../../FORK-DEVELOPMENT.md)。
-- Ubuntu 独立移植（开发中）：[Ubuntu 进度与边界](../sources/ubuntu-development.md)。
+- Ubuntu IPv4 预览：[Ubuntu 实现、验收与边界](../sources/ubuntu-development.md)。
 - 当前架构与实现入口：[架构简报](../sources/project-brief.md)。
 - 本地调试、构建和资源更新：[开发说明](../sources/development.md)。
 - PKG 构建、版本、签名和产物：[构建与发布](../sources/releasing.md)。

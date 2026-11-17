@@ -27,7 +27,28 @@ func ProbeNode(ctx context.Context, binary string, node map[string]any, target i
 	return probeNodeWithServiceTrust(ctx, binary, node, target, chatGPTTLSHosts, nil)
 }
 
-func probeNodeWithServiceTrust(ctx context.Context, binary string, node map[string]any, target int, hosts []string, roots *x509.CertPool) (ProbeResult, error) {
+type ProbeNetwork struct {
+	Interface string
+	Resolvers []string
+}
+
+// Bind probes to the physical uplink so a failed live outlet cannot capture
+// the traffic intended to verify its replacement. This changes no host routes.
+func ProbeNodeWithNetwork(ctx context.Context, binary string, node map[string]any, target int, network ProbeNetwork) (ProbeResult, error) {
+	return probeNodeWithServiceTrust(ctx, binary, node, target, chatGPTTLSHosts, nil, network)
+}
+
+func ProbeUpstream(ctx context.Context, binary string, network ProbeNetwork) bool {
+	for _, target := range []int{3, 4} {
+		r, err := ProbeNodeWithNetwork(ctx, binary, map[string]any{"name": "opensurge-physical-upstream", "type": "direct"}, target, network)
+		if err == nil && r.Reachable {
+			return true
+		}
+	}
+	return false
+}
+
+func probeNodeWithServiceTrust(ctx context.Context, binary string, node map[string]any, target int, hosts []string, roots *x509.CertPool, networks ...ProbeNetwork) (ProbeResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, 12*time.Second)
 	defer cancel()
 	dir, err := os.MkdirTemp("", "opensurge-isolated-probe-")
@@ -63,6 +84,21 @@ func probeNodeWithServiceTrust(ctx context.Context, binary string, node map[stri
 		return ProbeResult{}, fmt.Errorf("unresolved probe dependency")
 	}
 	doc := map[string]any{"mixed-port": port, "bind-address": "127.0.0.1", "allow-lan": false, "mode": "rule", "log-level": "silent", "ipv6": false, "tun": map[string]any{"enable": false}, "proxies": []any{node}, "rules": []string{"MATCH," + name}, "dns": map[string]any{"enable": true, "nameserver": []string{"1.1.1.1", "8.8.8.8"}, "proxy-server-nameserver": []string{"1.1.1.1", "8.8.8.8"}}}
+	if len(networks) > 0 {
+		n := networks[0]
+		if n.Interface != "" {
+			if _, err := net.InterfaceByName(n.Interface); err != nil {
+				return ProbeResult{}, fmt.Errorf("probe physical interface unavailable")
+			}
+			if specified, _ := node["interface-name"].(string); specified != "" && specified != n.Interface {
+				return ProbeResult{}, fmt.Errorf("unresolved probe interface dependency")
+			}
+			doc["interface-name"] = n.Interface
+		}
+		if len(n.Resolvers) > 0 {
+			doc["dns"] = map[string]any{"enable": true, "nameserver": n.Resolvers, "proxy-server-nameserver": n.Resolvers}
+		}
+	}
 	doc["external-controller"], doc["secret"] = fmt.Sprintf("127.0.0.1:%d", apiPort), secret
 	data, err := yaml.Marshal(doc)
 	if err != nil {
@@ -120,6 +156,12 @@ func probeNodeWithServiceTrust(ctx context.Context, binary string, node map[stri
 	if target == 1 {
 		testURL = "https://www.gstatic.com/generate_204"
 	}
+	if target == 3 {
+		testURL = "https://www.baidu.com/"
+	}
+	if target == 4 {
+		testURL = "https://www.qq.com/"
+	}
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, testURL, nil)
 	start := time.Now()
 	resp, err := client.Do(req)
@@ -127,6 +169,9 @@ func probeNodeWithServiceTrust(ctx context.Context, binary string, node map[stri
 		return ProbeResult{}, nil
 	}
 	defer resp.Body.Close()
+	if target == 3 || target == 4 {
+		return ProbeResult{Reachable: resp.StatusCode >= 200 && resp.StatusCode < 400, DelayMS: int(time.Since(start).Milliseconds())}, nil
+	}
 	data, err = io.ReadAll(io.LimitReader(resp.Body, 8193))
 	if err != nil || len(data) > 8192 {
 		return ProbeResult{}, nil

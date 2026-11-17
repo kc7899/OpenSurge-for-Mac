@@ -10,6 +10,9 @@ dpkg-deb --info "$PKG"
 sudo apt-get install -y "$PKG"
 sudo systemctl is-active --quiet opensurge-helper opensurge-control
 sudo systemd-analyze verify /usr/lib/systemd/system/opensurge-{helper,control}.service
+test -s /usr/share/doc/opensurge-gateway/UBUNTU-NOTICES.md
+test -s /usr/share/doc/opensurge-gateway/licenses/react-MIT.txt
+test -s /usr/share/doc/opensurge-gateway/source-commit
 # Service installation must not start a gateway or advertise/alter addressing.
 sudo test ! -e /var/lib/opensurge/runtime/state.json
 if ip link show opensurge0 >/dev/null 2>&1; then echo 'Installer started TUN unexpectedly' >&2; exit 1; fi

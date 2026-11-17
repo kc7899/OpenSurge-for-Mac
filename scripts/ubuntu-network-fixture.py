@@ -3,6 +3,7 @@
 import socketserver
 import struct
 import threading
+import sys
 
 
 class DNS(socketserver.BaseRequestHandler):
@@ -21,6 +22,9 @@ class DNS(socketserver.BaseRequestHandler):
 
 class HTTP(socketserver.BaseRequestHandler):
     def handle(self):
+        if len(sys.argv)>1:
+            with open(sys.argv[1], 'a') as records:
+                records.write(self.server.label + '\n')
         self.request.settimeout(5)
         data = b''
         while b'\r\n\r\n' not in data and len(data) < 16384:
