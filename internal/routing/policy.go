@@ -11,6 +11,7 @@ import (
 
 type Policy struct {
 	Enabled         bool     `json:"enabled"`
+	ChatGPTTLS      bool     `json:"chatgpt_tls"`
 	SourceOrder     []string `json:"source_order"`
 	Regions         []string `json:"regions"`
 	Forbidden       []string `json:"forbidden"`
@@ -20,7 +21,7 @@ type Policy struct {
 }
 
 func DefaultPolicy() Policy {
-	return Policy{Regions: []string{"US", "SG", "JP"}, Forbidden: []string{"HK"}, HealthSeconds: 60, QuotaSeconds: 600, CooldownSeconds: 300}
+	return Policy{ChatGPTTLS: true, Regions: []string{"US", "SG", "JP"}, Forbidden: []string{"HK"}, HealthSeconds: 60, QuotaSeconds: 600, CooldownSeconds: 300}
 }
 func (p Policy) Validate() error {
 	if p.HealthSeconds < 15 || p.HealthSeconds > 3600 || p.QuotaSeconds < 60 || p.QuotaSeconds > 86400 || p.CooldownSeconds < 30 || p.CooldownSeconds > 86400 {
@@ -178,10 +179,20 @@ type Candidate struct {
 	Fingerprint string `json:"fingerprint"`
 	Name        string `json:"name"`
 }
+type ServiceTLSObservation struct {
+	Status    string    `json:"status"`
+	Host      string    `json:"host,omitempty"`
+	Error     string    `json:"error,omitempty"`
+	CheckedAt time.Time `json:"checked_at"`
+	RetryAt   time.Time `json:"retry_at,omitempty"`
+	Successes int       `json:"successes"`
+}
+
 type Observation struct {
-	Version     string    `json:"version"`
-	Fingerprint string    `json:"fingerprint"`
-	CheckedAt   time.Time `json:"checked_at"`
+	ServiceTLS  *ServiceTLSObservation `json:"service_tls,omitempty"`
+	Version     string                 `json:"version"`
+	Fingerprint string                 `json:"fingerprint"`
+	CheckedAt   time.Time              `json:"checked_at"`
 	// Failure is confirmed only by the detector after independent-target retest.
 	Healthy          bool      `json:"healthy"`
 	ConfirmedFailure bool      `json:"confirmed_failure"`
@@ -245,6 +256,8 @@ func Decide(p Policy, s Snapshot, now time.Time) Decision {
 			reason = "quota_exhausted_or_expired"
 		case fresh(o, current, s, p, now) && o.Country != "" && !allowed(o, p):
 			reason = "region_disallowed"
+		case p.ChatGPTTLS && fresh(o, current, s, p, now) && o.Healthy && serviceFailed(o.ServiceTLS, p, now):
+			reason = "service_certificate_failure"
 		case fresh(o, current, s, p, now) && o.Healthy && allowed(o, p):
 			return keep("current_healthy")
 		case fresh(o, current, s, p, now) && o.ConfirmedFailure:
@@ -268,6 +281,35 @@ func Decide(p Policy, s Snapshot, now time.Time) Decision {
 		}
 		return keep("scan_incomplete")
 	}
+	for _, c := range backupCandidates(p, s, now, false) {
+		if reason == "service_certificate_failure" && !servicePassed(s.Observations[c.ID].ServiceTLS, p, now) {
+			continue
+		}
+		return Decision{Target: c.ID, Reason: reason, Change: c.ID != s.Current}
+	}
+	if reason == "service_certificate_failure" {
+		return keep("service_certificate_no_verified_backup")
+	}
+	if s.ScanComplete || hard {
+		return Decision{Target: Reject, Reason: "no_eligible_candidate", Change: s.Current != Reject}
+	}
+	return keep("scan_incomplete")
+}
+
+func backupCandidates(p Policy, s Snapshot, now time.Time, includeRecovering bool) []Candidate {
+	sources := map[string]Source{}
+	for _, src := range s.Sources {
+		sources[src.ID] = src
+	}
+	var current Candidate
+	found := false
+	for _, c := range s.Candidates {
+		if c.ID == s.Current {
+			current, found = c, true
+			break
+		}
+	}
+	out := []Candidate{}
 	order := OrderedSources(s.Sources, p.SourceOrder)
 	if found && !sources[current.SourceID].Quota.Exhausted(now) {
 		for i, src := range order {
@@ -285,8 +327,7 @@ func Decide(p Policy, s Snapshot, now time.Time) Decision {
 			if contains(p.Forbidden, country) {
 				continue
 			}
-			var best *Candidate
-			bestDelay := 0
+			eligible := []Candidate{}
 			for i := range s.Candidates {
 				c := &s.Candidates[i]
 				o := s.Observations[c.ID]
@@ -296,18 +337,20 @@ func Decide(p Policy, s Snapshot, now time.Time) Decision {
 				if !o.RetryAt.IsZero() && o.Successes < 2 {
 					continue
 				}
-				if best == nil || o.DelayMS < bestDelay || (o.DelayMS == bestDelay && c.ID < best.ID) {
-					best = c
-					bestDelay = o.DelayMS
+				if p.ChatGPTTLS && o.ServiceTLS != nil && (o.ServiceTLS.Status == "certificate_failed" || (!o.ServiceTLS.RetryAt.IsZero() && (now.Before(o.ServiceTLS.RetryAt) || o.ServiceTLS.Successes < 2))) && (!includeRecovering || now.Before(o.ServiceTLS.RetryAt)) {
+					continue
 				}
+				eligible = append(eligible, *c)
 			}
-			if best != nil {
-				return Decision{Target: best.ID, Reason: reason, Change: best.ID != s.Current}
-			}
+			sort.Slice(eligible, func(i, j int) bool {
+				a, b := s.Observations[eligible[i].ID].DelayMS, s.Observations[eligible[j].ID].DelayMS
+				if a != b {
+					return a < b
+				}
+				return eligible[i].ID < eligible[j].ID
+			})
+			out = append(out, eligible...)
 		}
 	}
-	if s.ScanComplete || hard {
-		return Decision{Target: Reject, Reason: "no_eligible_candidate", Change: s.Current != Reject}
-	}
-	return keep("scan_incomplete")
+	return out
 }

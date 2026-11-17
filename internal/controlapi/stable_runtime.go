@@ -24,6 +24,7 @@ type stableRuntime struct {
 	state    stableStatus
 }
 type stableStatus struct {
+	ServiceTLS   *routing.ServiceTLSObservation `json:"service_tls,omitempty"`
 	UpdatedAt    time.Time                      `json:"updated_at"`
 	Mode         string                         `json:"mode"`
 	Message      string                         `json:"message"`
@@ -275,6 +276,7 @@ func (s *Server) stableCycle(ctx context.Context, p routing.Policy, revision str
 	previous.Node = ""
 	previous.Country = ""
 	previous.IP = ""
+	previous.ServiceTLS = nil
 	for _, c := range graph.Candidates {
 		if c.ID == previous.Current {
 			previous.SourceID = c.SourceID
@@ -282,6 +284,7 @@ func (s *Server) stableCycle(ctx context.Context, p routing.Policy, revision str
 			o := result.Observations[c.ID]
 			previous.Country = o.Country
 			previous.IP = o.IP
+			previous.ServiceTLS = o.ServiceTLS
 		}
 	}
 	retired := false
@@ -295,6 +298,17 @@ func (s *Server) stableCycle(ctx context.Context, p routing.Policy, revision str
 		s.sourcesMu.Unlock()
 	}
 	previous.Message = "线路检查完成；可用时保持当前选择"
+	if p.ChatGPTTLS && previous.ServiceTLS != nil {
+		switch previous.ServiceTLS.Status {
+		case "certificate_failed":
+			previous.Message = "ChatGPT 证书异常已复测确认；仅在合格备用验证通过后切换，暂无合格备用时保留当前线路"
+		case "unknown", "recovery_pending":
+			previous.Message = "ChatGPT 证书检测尚未确认；保持当前线路，不凭超时切换"
+		}
+	}
+	if previous.Reason == "service_certificate_failure" && result.Changed {
+		previous.Message = "已切换：原线路 ChatGPT 证书异常经复测确认，备用线路已通过证书与地区验证"
+	}
 	if previous.Current == routing.Reject {
 		previous.Mode = "waiting"
 		previous.Message = "无合格代理出口，等待恢复；直连规则继续生效"

@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { request } from '../api'
 import { t } from '../i18n'
 
-type Policy = { enabled: boolean; source_order: string[] | null; regions: string[]; forbidden: string[]; health_seconds: number; quota_seconds: number; cooldown_seconds: number }
-type View = { policy: Policy; revision: string; message: string; sources: { id: string; name: string }[]; state: { mode: string; message: string; node?: string; country?: string; ip?: string; reason?: string; updated_at?: string; quotas?: Record<string, {known: boolean; used: number; total: number; error?: string}> } }
+type Policy = { enabled: boolean; chatgpt_tls: boolean; source_order: string[] | null; regions: string[]; forbidden: string[]; health_seconds: number; quota_seconds: number; cooldown_seconds: number }
+type View = { policy: Policy; revision: string; message: string; sources: { id: string; name: string }[]; state: { service_tls?: {status: string; host?: string; error?: string; checked_at: string; retry_at?: string}; mode: string; message: string; node?: string; country?: string; ip?: string; reason?: string; updated_at?: string; quotas?: Record<string, {known: boolean; used: number; total: number; error?: string}> } }
 export function StableRoutingCard({ onSaved }: { onSaved?: () => void } = {}) {
  const [view, setView] = useState<View | null>(null)
  const [draft, setDraft] = useState<Policy | null>(null)
@@ -24,6 +24,8 @@ export function StableRoutingCard({ onSaved }: { onSaved?: () => void } = {}) {
   {draft && <>
    <label><input type="checkbox" checked={draft.enabled} onChange={e => edit({ ...draft, enabled: e.target.checked })} />{t('启用自动切换')}</label>
    <p>{t('当前线路可用就保持；确认故障、额度耗尽或地区不合规时才切换。')}</p>
+   <label><input type="checkbox" checked={draft.chatgpt_tls} onChange={e => edit({ ...draft, chatgpt_tls: e.target.checked })} />{t('ChatGPT 证书异常确认后自动切换全网出口')}</label>
+   <p>{t('连续确认当前节点证书异常，且合格备用验证通过后才切换；超时或 HTTP 拒绝不直接触发。检查 chatgpt.com 和 api.openai.com，不能代替 iPhone App 内部验证。')}</p>
    <div className="form-grid">
     {([['health_seconds', '线路检测间隔（秒）'], ['quota_seconds', '额度检测间隔（秒）'], ['cooldown_seconds', '故障冷却（秒）']] as const).map(([key, label]) => <label key={key}>{t(label)}<input type="number" value={draft[key]} min={key === 'health_seconds' ? 15 : key === 'cooldown_seconds' ? 30 : 60} onChange={e => edit({ ...draft, [key]: Number(e.target.value) })} /></label>)}
     <label>{t('地区顺序（国家代码，逗号分隔）')}<input value={draft.regions.join(',')} onChange={e => edit({ ...draft, regions: e.target.value.toUpperCase().split(',').map(s => s.trim()) })} /></label>
@@ -33,8 +35,16 @@ export function StableRoutingCard({ onSaved }: { onSaved?: () => void } = {}) {
    <ol>{ids.map((id, index) => <li key={id}>{view?.sources.find(s => s.id === id)?.name ?? id} <button disabled={busy || index === 0} onClick={() => move(index, -1)} aria-label={t('上移')}>↑</button> <button disabled={busy || index === ids.length - 1} onClick={() => move(index, 1)} aria-label={t('下移')}>↓</button></li>)}</ol>
    <div className="button-row"><button disabled={busy} onClick={() => void save()}>{t('保存设置')}</button><button disabled={busy || !draft.enabled || dirty.current} onClick={() => void check()}>{t('立即检查')}</button></div>
   </>}
-  {view && <><p>{view.message}</p><p>{view.state.message}</p><p>{t('当前线路')}：{view.state.node || '—'} · {view.state.country || '—'} · {view.state.ip || '—'}</p><p>{t('切换原因')}：{view.state.reason || '—'}</p>
+  {view && <><p>{view.message}</p><p>{view.state.message}</p><p>{t('当前线路')}：{view.state.node || '—'} · {view.state.country || '—'} · {view.state.ip || '—'}</p><p>{t('切换原因')}：{view.state.reason ? reasonLabel(view.state.reason) : '—'}</p>
+   {view.policy.chatgpt_tls && <p>{t('ChatGPT 证书检测')}：{view.state.service_tls ? tlsLabel(view.state.service_tls.status) : t('尚未检测')}{view.state.service_tls?.host ? ` · ${view.state.service_tls.host}` : ''}{view.state.service_tls?.error ? ` · ${tlsErrorLabel(view.state.service_tls.error)}` : ''}{view.state.service_tls?.checked_at ? ` · ${new Date(view.state.service_tls.checked_at).toLocaleString()}` : ''}</p>}
    {view.sources.map(source => { const q = view.state.quotas?.[source.id]; return <p key={source.id}>{source.name}：{q?.known ? `${Math.max(0, q.total - q.used).toLocaleString()} / ${q.total.toLocaleString()} B` : t('额度未知')}{q?.error ? ` · ${q.error}` : ''}</p> })}
   </>}
  </section>
 }
+
+function reasonLabel(reason: string) {
+ const labels: Record<string,string> = {service_certificate_failure:'ChatGPT 证书异常，备用验证通过',service_certificate_no_verified_backup:'ChatGPT 证书异常，暂无验证通过的备用',current_healthy:'当前线路健康，保持不变',current_status_unknown:'当前线路状态未确认，保持不变',scan_incomplete:'备用检查尚未完成，保持当前线路',upstream_unknown:'本机网络状态未确认，保持当前线路',confirmed_failure:'当前线路故障经复测确认',region_disallowed:'当前出口地区不符合设置',quota_exhausted_or_expired:'当前订阅已耗尽或过期',node_removed:'当前节点已被订阅移除',initial_selection:'选择合格出口',no_eligible_candidate:'没有合格代理出口',automatic_disabled:'自动切换已关闭'}
+ return labels[reason] ? t(labels[reason]) : reason
+}
+function tlsLabel(status:string) { return t(({passed:'证书验证通过',certificate_failed:'证书异常已复测确认',unknown:'检测未确认，保持线路',recovery_pending:'恢复验证尚未完成'} as Record<string,string>)[status] || '尚未检测') }
+function tlsErrorLabel(error:string) { return t(({hostname_mismatch:'证书域名不匹配',untrusted_chain:'证书链不受信任',invalid_validity:'证书有效期异常',invalid_certificate:'证书验证失败'} as Record<string,string>)[error] || '证书验证失败') }

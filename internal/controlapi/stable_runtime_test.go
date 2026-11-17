@@ -87,7 +87,7 @@ func TestStableRuntimeKeepsHealthySelectionWithoutLifecycleRunner(t *testing.T) 
 	}
 	previous := stableStatus{Quotas: map[string]routing.Quota{"one": {CheckedAt: time.Now(), Known: true, Total: 100}}}
 	got := s.stableCycle(context.Background(), p, revision, previous)
-	if got.Mode != "active" || got.Current != current || got.Reason != "current_healthy" || calls != 1 {
+	if got.Mode != "active" || got.Current != current || got.Reason != "current_healthy" || calls != 2 || got.ServiceTLS == nil || got.ServiceTLS.Status != "passed" {
 		t.Fatalf("status=%+v probes=%d", got, calls)
 	}
 	// No ActionRunner or ConfigurationRunner was supplied: a lifecycle call would

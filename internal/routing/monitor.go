@@ -62,12 +62,21 @@ func (m *Monitor) Check(ctx context.Context, p Policy, s Snapshot, selector Sele
 	for _, c := range s.Candidates {
 		if c.ID == s.Current {
 			o := Detect(ctx, c, s.Version, m.observations[c.ID], now, time.Duration(p.CooldownSeconds)*time.Second, probe)
+			if p.ChatGPTTLS && o.Healthy {
+				o.ServiceTLS = detectServiceTLS(ctx, c, o.ServiceTLS, true, p, now, probe)
+			}
 			m.observations[c.ID] = o
 			s.Observations[c.ID] = o
 			break
 		}
 	}
 	d := Decide(p, s, now())
+	serviceIncident := false
+	for _, c := range s.Candidates {
+		if c.ID == s.Current {
+			serviceIncident = p.ChatGPTTLS && serviceFailed(s.Observations[c.ID].ServiceTLS, p, now())
+		}
+	}
 	if !d.Change && (d.Reason == "current_healthy" || d.Reason == "current_status_unknown" || d.Reason == "upstream_unknown") {
 		return result(d, false), nil
 	}
@@ -130,6 +139,52 @@ sendLoop:
 		o := s.Observations[c.ID]
 		if !o.Healthy && !o.ConfirmedFailure && !now().Before(o.RetryAt) {
 			s.ScanComplete = false
+		}
+	}
+	// Only preferred eligible alternatives need service probes. This reuses the
+	// same source/region/delay ordering and avoids probing every service on every
+	// node. The single monitor and executor remain the only switching path.
+	if p.ChatGPTTLS && s.ScanComplete && ctx.Err() == nil {
+		// A large candidate sweep can outlive the original current observation.
+		// Obtain fresh evidence instead of either using stale failure data or
+		// silently abandoning a confirmed service incident forever.
+		if serviceIncident {
+			for _, c := range s.Candidates {
+				if c.ID == s.Current && !fresh(s.Observations[c.ID], c, s, p, now()) {
+					o := Detect(ctx, c, s.Version, m.observations[c.ID], now, time.Duration(p.CooldownSeconds)*time.Second, probe)
+					if o.Healthy {
+						o.ServiceTLS = detectServiceTLS(ctx, c, o.ServiceTLS, true, p, now, probe)
+					}
+					m.observations[c.ID], s.Observations[c.ID] = o, o
+				}
+			}
+		}
+		serviceFault := false
+		for _, c := range s.Candidates {
+			if c.ID == s.Current {
+				serviceFault = serviceFailed(s.Observations[c.ID].ServiceTLS, p, now())
+			}
+		}
+		for _, c := range backupCandidates(p, s, now(), true) {
+			o := s.Observations[c.ID]
+			if !serviceFault && (o.ServiceTLS == nil || (o.ServiceTLS.Status != "certificate_failed" && (o.ServiceTLS.RetryAt.IsZero() || servicePassed(o.ServiceTLS, p, now())))) {
+				continue
+			}
+			o.ServiceTLS = detectServiceTLS(ctx, c, o.ServiceTLS, false, p, now, probe)
+			m.observations[c.ID], s.Observations[c.ID] = o, o
+			if servicePassed(o.ServiceTLS, p, now()) {
+				if serviceFault {
+					// Reconfirm the actual current outlet before changing a global IP.
+					for _, cur := range s.Candidates {
+						if cur.ID == s.Current {
+							current := s.Observations[cur.ID]
+							current.ServiceTLS = detectServiceTLS(ctx, cur, current.ServiceTLS, true, p, now, probe)
+							m.observations[cur.ID], s.Observations[cur.ID] = current, current
+						}
+					}
+				}
+				break
+			}
 		}
 	}
 	d = Decide(p, s, now())

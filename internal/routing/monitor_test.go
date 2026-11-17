@@ -8,6 +8,7 @@ import (
 
 func TestMonitorHealthyDoesNotSweepOrMutate(t *testing.T) {
 	p, s, n := fixture()
+	p.ChatGPTTLS = false
 	s.ScanComplete = false
 	m := &Monitor{Now: func() time.Time { return n }}
 	calls := 0
@@ -23,6 +24,7 @@ func TestMonitorHealthyDoesNotSweepOrMutate(t *testing.T) {
 }
 func TestMonitorConfirmedFailureChangesOnce(t *testing.T) {
 	p, s, n := fixture()
+	p.ChatGPTTLS = false
 	s.ScanComplete = false
 	m := &Monitor{Now: func() time.Time { return n }}
 	probe := func(_ context.Context, c Candidate, target int) ProbeResult {
@@ -47,6 +49,7 @@ func TestMonitorConfirmedFailureChangesOnce(t *testing.T) {
 
 func TestMonitorHardProhibitionRejectsEvenWhenUpstreamUnknown(t *testing.T) {
 	p, s, n := fixture()
+	p.ChatGPTTLS = false
 	s.NetworkReady = false
 	m := &Monitor{Now: func() time.Time { return n }}
 	probe := func(context.Context, Candidate, int) ProbeResult {

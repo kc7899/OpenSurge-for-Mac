@@ -75,7 +75,9 @@ func (s *Server) handleStableSettings(w http.ResponseWriter, r *http.Request) {
 			writeError(w, 409, "revision_conflict", "reload settings before saving")
 			return
 		}
-		var draft routing.Policy
+		// Older cached clients do not send this additive switch. Omission must
+		// preserve the saved choice; an explicit false still disables the guard.
+		draft := routing.Policy{ChatGPTTLS: p.ChatGPTTLS}
 		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10))
 		decoder.DisallowUnknownFields()
 		if err = decoder.Decode(&draft); err != nil {
@@ -113,7 +115,7 @@ func (s *Server) handleStableSettings(w http.ResponseWriter, r *http.Request) {
 		revision = mihomo.ProfileOverlayDigest(raw)
 	}
 	w.Header().Set("ETag", `"`+revision+`"`)
-	writeJSON(w, 200, stableSettingsResponse{State: s.stable.snapshot(), Policy: p, Revision: revision, Sources: routing.OrderedSources(sources, p.SourceOrder), Message: "设置已保存；首次启用或订阅内容变化后，请应用一次订阅配置。日常检测不会重载网关。"})
+	writeJSON(w, 200, stableSettingsResponse{State: s.stable.snapshot(), Policy: p, Revision: revision, Sources: routing.OrderedSources(sources, p.SourceOrder), Message: "设置供下一次检查使用，无需重载；仅首次迁移动态节点池或修改分流配置时需要显式应用。"})
 }
 
 func (s *Server) composeStableSources(composition mihomo.ProfileOverlayComposition) (mihomo.ProfileOverlayComposition, error) {

@@ -56,6 +56,20 @@ func TestStableSettingsAreRevisionedDrafts(t *testing.T) {
 	if err != nil || !saved.Enabled || len(saved.SourceOrder) != 2 || saved.SourceOrder[0] != "beta" {
 		t.Fatal(saved, err)
 	}
+	// A cached rc.3 page can save other settings without knowing the new field.
+	var oldClient map[string]json.RawMessage
+	_ = json.Unmarshal(raw, &oldClient)
+	delete(oldClient, "chatgpt_tls")
+	oldRaw, _ := json.Marshal(oldClient)
+	_, oldRevision, _ := s.loadStablePolicy()
+	oldReq := httptest.NewRequest(http.MethodPut, "/", bytes.NewReader(oldRaw))
+	oldReq.Header.Set("If-Match", oldRevision)
+	oldResponse := httptest.NewRecorder()
+	s.handleStableSettings(oldResponse, oldReq)
+	preserved, _, preserveErr := s.loadStablePolicy()
+	if oldResponse.Code != 200 || preserveErr != nil || !preserved.ChatGPTTLS {
+		t.Fatal("cached client disabled service guard", oldResponse.Body.String(), preserveErr)
+	}
 	entries, err := os.ReadDir(store.Dir())
 	if err != nil {
 		t.Fatal(err)
@@ -97,4 +111,39 @@ func TestPrivateDevelopmentLibraryLoads(t *testing.T) {
 		t.Fatal("development library is empty")
 	}
 	t.Logf("loaded %d copied subscriptions through the application's managed snapshot validator", len(sources))
+}
+
+func TestServiceTLSDefaultMigrationPreservesSavedPolicy(t *testing.T) {
+	store := NewStore(t.TempDir())
+	if err := store.Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{store: store}
+	p := routing.DefaultPolicy()
+	p.Enabled = true
+	p.SourceOrder = []string{"stable-source-id"}
+	data, _ := json.Marshal(p)
+	var fields map[string]json.RawMessage
+	_ = json.Unmarshal(data, &fields)
+	delete(fields, "chatgpt_tls")
+	legacy, _ := json.Marshal(fields)
+	path := filepath.Join(store.Dir(), stableSettingsFile)
+	if err := os.WriteFile(path, legacy, 0600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, _, err := s.loadStablePolicy()
+	if err != nil || !loaded.ChatGPTTLS || !loaded.Enabled || len(loaded.SourceOrder) != 1 || loaded.SourceOrder[0] != "stable-source-id" {
+		t.Fatal(loaded, err)
+	}
+	actual, _ := os.ReadFile(path)
+	if !bytes.Equal(actual, legacy) {
+		t.Fatal("loading migration rewrote existing settings")
+	}
+	loaded.ChatGPTTLS = false
+	data, _ = json.Marshal(loaded)
+	_ = os.WriteFile(path, data, 0600)
+	loaded, _, err = s.loadStablePolicy()
+	if err != nil || loaded.ChatGPTTLS {
+		t.Fatal("explicit guard opt-out was not preserved", loaded, err)
+	}
 }

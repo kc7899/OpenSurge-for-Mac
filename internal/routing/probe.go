@@ -2,6 +2,7 @@ package routing
 
 import (
 	"context"
+	"crypto/x509"
 	"fmt"
 	"io"
 	"net"
@@ -21,6 +22,10 @@ import (
 // It cannot change live selectors, host DNS, routing or the running core.
 // Node data and process output never appear in errors or logs.
 func ProbeNode(ctx context.Context, binary string, node map[string]any, target int) (ProbeResult, error) {
+	return probeNodeWithServiceTrust(ctx, binary, node, target, chatGPTTLSHosts, nil)
+}
+
+func probeNodeWithServiceTrust(ctx context.Context, binary string, node map[string]any, target int, hosts []string, roots *x509.CertPool) (ProbeResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, 12*time.Second)
 	defer cancel()
 	dir, err := os.MkdirTemp("", "opensurge-isolated-probe-")
@@ -74,6 +79,9 @@ func ProbeNode(ctx context.Context, binary string, node map[string]any, target i
 	}
 	if !ready {
 		return ProbeResult{}, fmt.Errorf("isolated core not ready")
+	}
+	if target == 2 {
+		return probeServiceTLS(ctx, address, hosts, roots), nil
 	}
 	proxyURL := &url.URL{Scheme: "http", Host: address}
 	transport := &http.Transport{Proxy: http.ProxyURL(proxyURL), DisableKeepAlives: true}
