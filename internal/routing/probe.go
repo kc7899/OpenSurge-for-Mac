@@ -38,16 +38,6 @@ func ProbeNodeWithNetwork(ctx context.Context, binary string, node map[string]an
 	return probeNodeWithServiceTrust(ctx, binary, node, target, chatGPTTLSHosts, nil, network)
 }
 
-func ProbeUpstream(ctx context.Context, binary string, network ProbeNetwork) bool {
-	for _, target := range []int{3, 4} {
-		r, err := ProbeNodeWithNetwork(ctx, binary, map[string]any{"name": "opensurge-physical-upstream", "type": "direct"}, target, network)
-		if err == nil && r.Reachable {
-			return true
-		}
-	}
-	return false
-}
-
 func probeNodeWithServiceTrust(ctx context.Context, binary string, node map[string]any, target int, hosts []string, roots *x509.CertPool, networks ...ProbeNetwork) (ProbeResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, 12*time.Second)
 	defer cancel()

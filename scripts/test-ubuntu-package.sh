@@ -15,6 +15,17 @@ test -s /usr/share/doc/opensurge-gateway/licenses/react-MIT.txt
 test -s /usr/share/doc/opensurge-gateway/source-commit
 # Service installation must not start a gateway or advertise/alter addressing.
 sudo test ! -e /var/lib/opensurge/runtime/state.json
+# The control identity can use the fixed helper channel, but cannot provide an
+# arbitrary probe URL, executable or unbounded target number.
+sudo -u opensurge python3 - <<'PY'
+import json, socket
+s = socket.socket(socket.AF_UNIX)
+s.connect('/run/opensurge/helper.sock')
+s.sendall(json.dumps({'action':'stable-probe','config_path':'/var/lib/opensurge/config.yaml','stable_probe':{'target':99,'candidate_id':'not-a-node'}}).encode() + b'\n')
+r = json.loads(s.makefile().readline())
+assert not r['ok'] and 'invalid stable probe target' in r['error'], r
+s.close()
+PY
 if ip link show opensurge0 >/dev/null 2>&1; then echo 'Installer started TUN unexpectedly' >&2; exit 1; fi
 test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:61767/api/v1/overview)" == 401
 [[ "$(sudo stat -c %U:%G:%a /var/lib/opensurge/config.yaml)" == root:opensurge:640 ]]

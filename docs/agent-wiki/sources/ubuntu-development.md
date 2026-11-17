@@ -8,6 +8,8 @@
 
 root Helper 与 opensurge 低权限控制服务分离。配置/节点文件 root:opensurge 0640，控制 store 0700、token 0600；显式代理及核心 DNS 仅监听 loopback。Web 经 SSH 16167 转发至服务 61767，配置精确浏览器 Origin，保持 CSRF 检查。初始化不复制 Mac 运行状态或私人订阅，安装不启动网关；升级和卸载先执行原生命周期清理，保留私人数据。
 
+独立检测绑定真实上游接口并使用接管前 DNS，避免失败主出口捕获备用检测。Linux 绑定 socket 在支持内核需要权限，因此沿用 root Helper 固定动作：只接受已保存候选 ID 与固定检测目标编号，要求当前启动会话、活跃进程身份及 profile digest 匹配；不接受任意节点、URL、可执行文件、接口或 CA。Web 服务不新增 capability。临时检测核心始终关闭 TUN/路由，仅监听 loopback；核心实际节点就绪后才检测。CI 包含低权限普通 TLS 测试、对应 root 绑定接口 TLS 测试，以及活跃 TUN/REJECT 下公共地址候选仍能独立到达的证明。
+
 边界：不自动改 Netplan/地址，不自动停用 UFW 等现有防火墙；Linux 首版下游 IPv6 转发在受管链阻断，不能声称接管主路由直接发布的 IPv6。Host IPv6/下游 BPF 尚不支持。仅 root Helper 负责固定特权动作，Web 控制服务使用独立低权限用户；默认 Web 走 loopback/SSH 转发，后续 LAN 密码访问沿用原机制。
 
 已通过：全部 Go 单元测试、405 项共享 Web 测试与构建、锁定源码 Linux Mihomo 构建、真实核心多来源/API 切换与 provider 更新、严格 TLS 故障避让；独立 mount/net namespace 中下游 DNS/fake-IP、PROXY/DIRECT/REJECT、API 选择后 PID/配置不变、核心消失保护、DNS 冲突回滚、转发恢复及外部 nft 表保留；独立 D-Bus 中真实 systemd-resolved 接管/恢复与空域清理；实际 dpkg/systemd 安装、Web 登录/CSRF、低权限导入和 root Helper 应用、同版本重装保留配置/token及卸载保留数据。

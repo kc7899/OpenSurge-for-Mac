@@ -116,6 +116,7 @@ type HelperClient struct {
 }
 
 type HelperRequest struct {
+	StableProbe        *StableProbeInput          `json:"stable_probe,omitempty"`
 	Action             string                     `json:"action"`
 	ConfigPath         string                     `json:"config_path"`
 	Manual             *macosnetwork.ManualConfig `json:"manual,omitempty"`
@@ -132,6 +133,7 @@ type HelperRequest struct {
 }
 
 type HelperResponse struct {
+	ProbeResult  *routing.ProbeResult     `json:"probe_result,omitempty"`
 	OK           bool                     `json:"ok"`
 	Error        string                   `json:"error,omitempty"`
 	DHCPServers  []string                 `json:"dhcp_servers,omitempty"`
@@ -354,6 +356,12 @@ func handleHelperConnWithManagers(ctx context.Context, conn net.Conn, allowedRoo
 	if err == nil && request.Action == "restart-mihomo" {
 		err = requireTrustedRestartInputs(cfg, allowedRoot)
 	}
+	if err == nil && request.Action == "stable-probe" {
+		probeConfig := cfg
+		probeConfig.DevicePolicy.File = ""
+		probeConfig.Tailscale.Enabled = false
+		err = requireTrustedCoreInputs(probeConfig, allowedRoot)
+	}
 	if err == nil && request.Action == "config-update-stable-pool" {
 		err = requireTrustedRestartInputs(cfg, allowedRoot)
 		if err == nil {
@@ -473,6 +481,14 @@ func handleHelperConnWithManagers(ctx context.Context, conn net.Conn, allowedRoo
 		}
 		runner := DirectRunner{}
 		switch request.Action {
+		case "stable-probe":
+			if request.StableProbe == nil {
+				err = fmt.Errorf("stable probe request is required")
+			} else {
+				var result routing.ProbeResult
+				result, err = runner.ProbeStable(ctx, configPath, *request.StableProbe)
+				response.ProbeResult = &result
+			}
 		case "config-update-stable-pool":
 			err = runner.UpdateStablePool(ctx, configPath, request.Revision, request.Payload)
 		case "custom-dns-preview":
@@ -580,7 +596,7 @@ func loadHelperConfig(action, configPath string) (config.Config, error) {
 	if action == "stop" || action == "config-apply-control" || action == "network-set-dhcp" || action == "dhcp-probe" {
 		return config.LoadRecovery(configPath)
 	}
-	if action == "config-update-stable-pool" || action == "restart-mihomo" || action == "policy-workspace" || action == "policy-workspace-hold" || action == "custom-dns-preview" {
+	if action == "stable-probe" || action == "config-update-stable-pool" || action == "restart-mihomo" || action == "policy-workspace" || action == "policy-workspace-hold" || action == "custom-dns-preview" {
 		return config.LoadRuntime(configPath)
 	}
 	return config.Load(configPath)
@@ -608,7 +624,7 @@ func reconcilePreparedPolicyEngine(allowedRoot string) error {
 
 func helperActionAllowed(action string) bool {
 	switch action {
-	case "config-update-stable-pool", "start", "stop", "reload", "restart-mihomo", "network-set-manual", "network-set-dhcp", "dhcp-probe", "config-apply-profile", "config-apply-device-policy", "config-apply-control", "config-apply-tailscale", "config-forget-tailscale-identity", "sleep-prevention-hold", "policy-workspace", "policy-workspace-hold", "custom-dns-preview":
+	case "stable-probe", "config-update-stable-pool", "start", "stop", "reload", "restart-mihomo", "network-set-manual", "network-set-dhcp", "dhcp-probe", "config-apply-profile", "config-apply-device-policy", "config-apply-control", "config-apply-tailscale", "config-forget-tailscale-identity", "sleep-prevention-hold", "policy-workspace", "policy-workspace-hold", "custom-dns-preview":
 		return true
 	default:
 		return false

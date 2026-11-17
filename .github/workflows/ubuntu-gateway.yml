@@ -70,7 +70,10 @@ jobs:
         if: ${{ !cancelled() && steps.core-build.outcome == 'success' }}
         env:
           OPENSURGE_TEST_CORE: ${{ github.workspace }}/bin/mihomo-linux-amd64
-        run: go test ./internal/controlapi ./internal/mihomo ./internal/routing -count=1
+        run: |
+          go test ./internal/controlapi ./internal/mihomo ./internal/routing -count=1
+          go test -c -o "$RUNNER_TEMP/opensurge-routing.test" ./internal/routing
+          sudo env OPENSURGE_TEST_CORE="$OPENSURGE_TEST_CORE" OPENSURGE_TEST_BIND_UPLINK=1 "$RUNNER_TEMP/opensurge-routing.test" -test.run '^TestCertificateFailoverThroughRealIsolatedCore$' -test.v
       - name: Offline IPv4 gateway data plane in private mount and network namespaces
         if: ${{ !cancelled() && steps.core-build.outcome == 'success' }}
         run: |

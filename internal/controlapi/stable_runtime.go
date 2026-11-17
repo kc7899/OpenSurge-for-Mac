@@ -11,10 +11,8 @@ import (
 	"time"
 
 	"open-mihomo-gateway/internal/config"
-	"open-mihomo-gateway/internal/macosnetwork"
 	"open-mihomo-gateway/internal/mihomo"
 	"open-mihomo-gateway/internal/routing"
-	runtimepkg "open-mihomo-gateway/internal/runtime"
 )
 
 type stableRuntime struct {
@@ -242,17 +240,20 @@ func (s *Server) stableCycle(ctx context.Context, p routing.Policy, revision str
 		sources[i].Quota = q
 	}
 	upstream := s.stable.upstream
-	network := routing.ProbeNetwork{Interface: cfg.Gateway.UpstreamInterface}
-	if state, exists, err := runtimepkg.LoadState(runtimepkg.NewPaths(cfg).StateFile); err == nil && exists && state.LocalSystemDNS != nil {
-		network.Resolvers = append([]string(nil), state.LocalSystemDNS.Resolvers...)
-	}
-	if len(network.Resolvers) == 0 && (s.stable.probe == nil || s.stable.upstream == nil) {
-		if info, err := macosnetwork.Discover(ctx, cfg.Gateway.UpstreamInterface, cfg.Gateway.UpstreamInterface); err == nil {
-			network.Resolvers = info.DNS
-		}
-	}
+	probeRunner, _ := s.runner.(stableProbeRunner)
 	if upstream == nil {
-		upstream = func(ctx context.Context) bool { return routing.ProbeUpstream(ctx, cfg.Mihomo.Binary, network) }
+		upstream = func(ctx context.Context) bool {
+			if probeRunner == nil {
+				return false
+			}
+			for _, target := range []int{3, 4} {
+				result, err := probeRunner.ProbeStable(ctx, s.configPath, StableProbeInput{Target: target})
+				if err == nil && result.Reachable {
+					return true
+				}
+			}
+			return false
+		}
 	}
 	networkReady := upstream(ctx)
 	snapshot := routing.Snapshot{Version: version, Current: current, Sources: sources, Candidates: graph.Candidates, Observations: previous.Observations, NetworkReady: networkReady, ScanComplete: false}
@@ -264,7 +265,10 @@ func (s *Server) stableCycle(ctx context.Context, p routing.Policy, revision str
 		if node == nil {
 			return routing.ProbeResult{InfrastructureError: true}
 		}
-		result, err := routing.ProbeNodeWithNetwork(probeCtx, cfg.Mihomo.Binary, node, target, network)
+		if probeRunner == nil {
+			return routing.ProbeResult{InfrastructureError: true}
+		}
+		result, err := probeRunner.ProbeStable(probeCtx, s.configPath, StableProbeInput{CandidateID: c.ID, Target: target})
 		if err != nil {
 			return routing.ProbeResult{InfrastructureError: true}
 		}
