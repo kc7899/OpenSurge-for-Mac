@@ -15,6 +15,7 @@ import (
 func main() {
 	configPath := flag.String("config", "examples/config.example.yaml", "path to gateway config")
 	addr := flag.String("addr", "127.0.0.1:61767", "loopback listen address")
+	browserOrigin := flag.String("browser-origin", "", "exact loopback browser origin when using a different SSH-forward port")
 	storeDir := flag.String("store", "", "application support directory")
 	helperSocket := flag.String("helper-socket", "/var/run/opensurge/helper.sock", "privileged helper socket")
 	direct := flag.Bool("direct-root", false, "run actions directly; requires root and is intended for development")
@@ -26,11 +27,12 @@ func main() {
 		runner = controlapi.DirectRunner{}
 	}
 	server, err := controlapi.New(controlapi.Options{
-		ConfigPath: *configPath,
-		Addr:       *addr,
-		StoreDir:   *storeDir,
-		Runner:     runner,
-		Static:     webui.Handler(),
+		ConfigPath:    *configPath,
+		Addr:          *addr,
+		BrowserOrigin: *browserOrigin,
+		StoreDir:      *storeDir,
+		Runner:        runner,
+		Static:        webui.Handler(),
 	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)

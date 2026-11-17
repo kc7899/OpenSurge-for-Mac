@@ -23,6 +23,8 @@ URL="$(sed -n 's@^http://127.0.0.1:16167/@http://127.0.0.1:61767/@p' "$WORK/cons
 [[ -n "$URL" ]]
 curl -fsS -c "$WORK/cookies" "$URL" -o /dev/null
 curl -fsS -b "$WORK/cookies" http://127.0.0.1:61767/api/v1/overview > "$WORK/overview.json"
+curl -fsS -b "$WORK/cookies" -H 'Origin: http://127.0.0.1:16167' -H 'Content-Type: application/json' -X PUT -d '{"language":"zh-Hans"}' http://127.0.0.1:61767/api/v1/ui-preferences -o /dev/null
+test "$(curl -s -o /dev/null -w '%{http_code}' -b "$WORK/cookies" -H 'Origin: https://untrusted.example' -H 'Content-Type: application/json' -X PUT -d '{"language":"en"}' http://127.0.0.1:61767/api/v1/ui-preferences)" == 403
 python3 - "$WORK/overview.json" <<'PY'
 import json, sys
 o = json.load(open(sys.argv[1]))

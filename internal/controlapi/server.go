@@ -13,6 +13,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -32,6 +33,7 @@ import (
 type Options struct {
 	ConfigPath        string
 	Addr              string
+	BrowserOrigin     string // Explicit loopback SSH-forward origin; not a wildcard.
 	StoreDir          string
 	Runner            ActionRunner
 	NetworkRunner     NetworkRunner
@@ -121,6 +123,14 @@ func New(options Options) (*Server, error) {
 	host, _, err := net.SplitHostPort(options.Addr)
 	if err != nil || (host != "127.0.0.1" && host != "localhost") {
 		return nil, fmt.Errorf("control API must listen on loopback IPv4")
+	}
+	baseURL := "http://" + options.Addr
+	if options.BrowserOrigin != "" {
+		u, err := url.Parse(options.BrowserOrigin)
+		if err != nil || u.Scheme != "http" || u.Hostname() != "127.0.0.1" || u.Port() == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" {
+			return nil, fmt.Errorf("browser origin must be an exact http://127.0.0.1:PORT origin")
+		}
+		baseURL = options.BrowserOrigin
 	}
 	if options.StoreDir == "" {
 		home, err := os.UserHomeDir()
@@ -251,7 +261,7 @@ func New(options Options) (*Server, error) {
 		mihomoRecovery:  newMihomoRecoveryController(),
 		sleepPrevention: newSleepPreventionController(options.SleepRunner, configPath),
 		token:           token,
-		baseURL:         "http://" + options.Addr,
+		baseURL:         baseURL,
 		sessions:        map[string]time.Time{},
 		bootstraps:      map[string]bootstrapGrant{},
 	}

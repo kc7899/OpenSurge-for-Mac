@@ -17,7 +17,7 @@ jobs:
           go-version-file: go.mod
           cache: true
       - name: Install namespace test dependencies
-        run: sudo apt-get update && sudo apt-get install -y nftables iproute2 dnsmasq-base dnsutils
+        run: sudo apt-get update && sudo apt-get install -y nftables iproute2 dnsmasq-base dnsutils dbus systemd-resolved
       - name: Unit tests
         run: go test ./...
       - name: Firewall ownership in a private network namespace
@@ -42,7 +42,21 @@ jobs:
           OPENSURGE_MIHOMO_OS: linux
           OPENSURGE_MIHOMO_ARCH: amd64
           OPENSURGE_MIHOMO_OUTPUT: ${{ github.workspace }}/bin/mihomo-linux-amd64
-        run: ./scripts/build-opensurge-mihomo.sh
+          GODEBUG: http2client=0
+        run: |
+          for attempt in 1 2 3; do
+            if ./scripts/build-opensurge-mihomo.sh; then exit 0; fi
+            echo "Pinned core build attempt $attempt failed; retrying without changing inputs."
+          done
+          exit 1
+      - name: Real systemd-resolved on a private D-Bus and network namespace
+        run: |
+          go test -c -o "$RUNNER_TEMP/opensurge-network.test" ./internal/macosnetwork
+          sudo env OPENSURGE_LINUX_NETWORK_TEST=1 unshare --mount --net bash -euc '
+            mount --make-rprivate /
+            mount -t tmpfs tmpfs /run
+            exec "$1" -test.run "^TestLinuxResolvedPrivateBusNamespace$" -test.v
+          ' _ "$RUNNER_TEMP/opensurge-network.test"
       - name: Existing real-core stable provider and policy integration
         env:
           OPENSURGE_TEST_CORE: ${{ github.workspace }}/bin/mihomo-linux-amd64

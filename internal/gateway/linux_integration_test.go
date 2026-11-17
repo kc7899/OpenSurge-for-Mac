@@ -5,6 +5,7 @@ package gateway
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -197,6 +198,23 @@ rules:
 	current, err = sysctl.New().Current()
 	if err != nil || current != before {
 		t.Fatal("failed start changed forwarding")
+	}
+	// Occupy downstream DNS only after the healthy core can start. This forces
+	// a post-forwarding failure and exercises the actual rollback path.
+	conflict, err := net.ListenPacket("udp4", "192.168.50.212:53")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conflict.Close()
+	if err := New(cfg).Start(ctx); err == nil {
+		t.Fatal("DNS conflict startup unexpectedly succeeded")
+	}
+	current, err = sysctl.New().Current()
+	if err != nil || current != before {
+		t.Fatal("rollback did not restore forwarding", err)
+	}
+	if loaded, err := pf.New(cfg, runtime.NewPaths(cfg)).Loaded(); err != nil || loaded {
+		t.Fatal("rollback retained firewall", loaded, err)
 	}
 	t.Log("IPv4 downstream DNS, proxy, direct, reject, API selection without restart, core-loss guard, owned cleanup and startup failure passed; IPv6/Tailscale/host-resolved not asserted")
 }
