@@ -59,7 +59,9 @@ export PATH="$(dirname "$NODE_BIN"):$PATH"
 "$PNPM_BIN" run test
 "$PNPM_BIN" run build
 cd "$ROOT"
-"$GO_BIN" test ./...
+# Exercise routing/provider/TLS gates against the exact isolated engine being
+# packaged. Without this opt-in, these real-core tests deliberately skip.
+OPENSURGE_TEST_CORE="$MIHOMO" "$GO_BIN" test ./...
 "$GO_BIN" run ./cmd/opensurge-install-config --source "$CONFIG" --validate-package-source
 mkdir -p "$ROOT/bin"
 GOOS=darwin GOARCH="$GO_ARCH" CGO_ENABLED=0 "$GO_BIN" build -trimpath -o "$ROOT/bin/omg" ./cmd/omg

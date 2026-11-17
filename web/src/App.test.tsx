@@ -1921,7 +1921,7 @@ describe('OpenSurge app shell', () => {
     render(<App />)
     await screen.findByRole('heading', { name: '全屋网关，一眼可见' })
     await userEvent.click(screen.getByRole('button', { name: '代理与规则源' }))
-    await userEvent.click(await screen.findByRole('button', { name: '刷新草稿' }))
+    await userEvent.click(await screen.findByRole('button', { name: '刷新订阅' }))
     const notifications = await screen.findByRole('complementary', { name: '操作结果通知' })
     expect(within(notifications).getByText('Home 已刷新；新内容已保存为草稿。')).toBeTruthy()
     expect(document.querySelector('.source-feedback')).toBeNull()

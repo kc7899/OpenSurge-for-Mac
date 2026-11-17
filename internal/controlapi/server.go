@@ -53,6 +53,7 @@ type Options struct {
 }
 
 type Server struct {
+	stable                stableRuntime
 	configPath            string
 	addr                  string
 	store                 *Store
@@ -214,6 +215,7 @@ func New(options Options) (*Server, error) {
 		options.RevealInFinder = revealPathInFinder
 	}
 	server := &Server{
+		stable:                stableRuntime{wake: make(chan struct{}, 1)},
 		configPath:            configPath,
 		addr:                  options.Addr,
 		store:                 store,
@@ -283,6 +285,9 @@ func (s *Server) routes(auth func(http.Handler) http.Handler, local bool) http.H
 			w.Header().Set("Cache-Control", "no-store")
 			writeJSON(w, http.StatusOK, map[string]string{"mode": "local"})
 		})
+		mux.Handle("POST /api/v1/stable-routing/check", auth(http.HandlerFunc(s.handleStableCheck)))
+		mux.Handle("GET /api/v1/stable-routing", auth(http.HandlerFunc(s.handleStableSettings)))
+		mux.Handle("PUT /api/v1/stable-routing", auth(http.HandlerFunc(s.handleStableSettings)))
 		mux.Handle("GET /api/v1/lan-access", auth(http.HandlerFunc(s.lan.handleConfig)))
 		mux.Handle("PUT /api/v1/lan-access", auth(http.HandlerFunc(s.lan.handleConfig)))
 		mux.Handle("POST /api/v1/lan-access/password", auth(http.HandlerFunc(s.lan.handleResetPassword)))
@@ -477,6 +482,7 @@ func (s *Server) Serve(ctx context.Context) error {
 	s.lan.start(ctx)
 	defer s.lan.close()
 	go s.monitorMihomoRecovery(ctx)
+	go s.monitorStableRouting(ctx)
 	go func() {
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -1687,6 +1693,13 @@ func (s *Server) handleSourceRefresh(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "source_refresh_failed", err.Error())
 		return
+	}
+	if refreshed.Valid {
+		if updated, poolErr := s.refreshStablePool(r.Context()); poolErr != nil {
+			refreshed.PoolUpdate = "订阅草稿已更新，运行节点池待应用：" + poolErr.Error()
+		} else if updated {
+			refreshed.PoolUpdate = "运行节点列表已更新；仍有效的当前线路保持不变"
+		}
 	}
 	refreshed.SnapshotPath = ""
 	refreshed.FetchURL = ""

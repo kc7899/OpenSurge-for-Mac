@@ -1,3 +1,5 @@
+> **Fork 研发预览：** 0.3.4-rc.1 的新增功能、验证范围与未完成项见 [Fork 更新记录](FORK-CHANGELOG.md)。此分支尚未达到完整正式产品交付标准。
+
 <div align="center">
   <img src="apps/desktop/Resources/OpenSurgeAppIcon.png" width="96" height="96" alt="OpenSurge for Mac App 图标">
   <h1>OpenSurge for Mac</h1>

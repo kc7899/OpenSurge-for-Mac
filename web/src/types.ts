@@ -209,6 +209,9 @@ export type RequestedLanguage = 'system' | 'zh-Hans' | 'en'
 export type UIPreferences = { schema_version: number; language: RequestedLanguage }
 
 export type Source = {
+  pool_current?: boolean
+  pool_update?: string
+  composition_pending?: boolean
   id: string
   name: string
   kind: string

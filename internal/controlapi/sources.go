@@ -18,13 +18,14 @@ import (
 
 	"open-mihomo-gateway/internal/config"
 	"open-mihomo-gateway/internal/mihomo"
+	"open-mihomo-gateway/internal/routing"
 
 	"gopkg.in/yaml.v3"
 )
 
 const (
 	maxSourceSize   = 10 << 20
-	sourceUserAgent = "clash.meta"
+	sourceUserAgent = "mihomo/1.19.0"
 )
 
 func (s *Server) importURL(ctx context.Context, req SourceImportRequest) (Source, error) {
@@ -90,6 +91,9 @@ func safeDialContext(ctx context.Context, network, address string) (net.Conn, er
 	ips, err := net.DefaultResolver.LookupIP(ctx, "ip", host)
 	if err != nil {
 		return nil, err
+	}
+	if len(ips) == 0 {
+		return nil, fmt.Errorf("source host has no addresses")
 	}
 	for _, ip := range ips {
 		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsUnspecified() {
@@ -200,6 +204,16 @@ func sourceVersion(source Source) SourceVersion {
 func (s *Server) decorateSourceStates(sources []Source) []Source {
 	desiredProfile, appliedProfile, desiredSource := s.profileCompositionDigests()
 	_, overlay, _, overlayErr := s.loadProfileOverlay()
+	activeVersion := ""
+	if cfg, e := config.LoadRuntime(s.configPath); e == nil && desiredProfile != "" && desiredProfile == appliedProfile {
+		if raw, e := os.ReadFile(cfg.Mihomo.Profile); e == nil {
+			if _, e := routing.PoolPath(raw, filepath.Dir(cfg.Mihomo.Profile)); e == nil {
+				if pool, e := routing.ReadPool(raw, filepath.Dir(cfg.Mihomo.Profile)); e == nil {
+					activeVersion = pool.Graph.Version
+				}
+			}
+		}
+	}
 	result := append([]Source(nil), sources...)
 	for i := range result {
 		result[i].Versions = append([]SourceVersion(nil), result[i].Versions...)
@@ -214,12 +228,19 @@ func (s *Server) decorateSourceStates(sources []Source) []Source {
 			result[i].OverlayCompatible = false
 			result[i].OverlayValidation = err.Error()
 		} else {
+			result[i].PoolCurrent = false
+			if activeVersion != "" {
+				if desired, e := routing.ReadPool([]byte(composition.ProfileYAML), ""); e == nil {
+					result[i].PoolCurrent = desired.Graph.Version == activeVersion
+				}
+			}
 			result[i].EffectiveDigest = composition.Digest
 			result[i].EffectiveInventory = inventoryFromInspection(composition.Inspection)
 			result[i].OverlayValidation = "compatible with global profile overlay"
 		}
 		result[i].Desired = desiredSource != "" && result[i].Digest == desiredSource
 		result[i].Applied = result[i].Desired && desiredProfile != "" && desiredProfile == appliedProfile
+		result[i].CompositionPending = result[i].Desired && result[i].EffectiveDigest != "" && result[i].EffectiveDigest != desiredProfile
 		for j := range result[i].Versions {
 			result[i].Versions[j].Desired = desiredSource != "" && result[i].Versions[j].Digest == desiredSource
 			result[i].Versions[j].Applied = result[i].Versions[j].Desired && desiredProfile != "" && desiredProfile == appliedProfile

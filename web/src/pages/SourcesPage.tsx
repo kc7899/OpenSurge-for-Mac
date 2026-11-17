@@ -4,6 +4,7 @@ import { api } from '../api'
 import { copyText } from '../desktop'
 import { Empty, PageHeader, SectionTitle } from '../components/Common'
 import type { OperationNotification } from '../components/OperationNotifications'
+import { StableRoutingCard } from '../components/StableRoutingCard'
 import { TailscaleCard } from '../components/TailscaleCard'
 import { ProfileOverlayPanel } from '../components/ProfileOverlayPanel'
 import { CustomDNSCard } from '../components/CustomDNSCard'
@@ -83,9 +84,10 @@ export function SourcesPage({ overview, onChanged, onNotify, onOpenNetwork, onDi
   const run = async (action: Exclude<SourceAction, null>, operation: () => Promise<unknown>, successMessage: string) => {
     setActiveAction(action)
     try {
-      await operation()
+      const outcome = await operation()
+      const poolUpdate = action.kind === 'refresh' && outcome && typeof outcome === 'object' && 'pool_update' in outcome ? String(outcome.pool_update ?? '') : ''
       await refresh()
-      onNotify({ tone: 'success', title: t(action.kind === 'refresh' ? '草稿已刷新' : '草稿已导入'), message: successMessage })
+      onNotify({ tone: 'success', title: t(action.kind === 'refresh' ? '订阅已刷新' : '草稿已导入'), message: poolUpdate || successMessage })
     } catch (cause) {
       onNotify({ tone: 'error', title: t('操作未完成'), message: cause instanceof Error ? cause.message : String(cause) })
     } finally {
@@ -172,6 +174,7 @@ export function SourcesPage({ overview, onChanged, onNotify, onOpenNetwork, onDi
   return <>
     <PageHeader eyebrow="SOURCES" title="代理与规则源" description="导入、校验、应用各自有明确状态；运行配置只会在完整校验成功后切换。" />
     {loadError && <div className="notice warn source-load-error" role="alert"><div><strong>{t('来源列表未能更新')}</strong><p>{loadError}</p></div><button type="button" disabled={busy} onClick={() => void refresh()}>{t('重试')}</button></div>}
+    <StableRoutingCard onSaved={() => void refreshSourceList()} />
     <TailscaleCard onChanged={onChanged} onNotify={onNotify} />
     <section className="section source-import-panel" aria-busy={activeAction?.kind === 'import-url' || activeAction?.kind === 'import-file'}>
       <SectionTitle title="添加配置来源" subtitle="导入只产生草稿，不会立即改变正在运行的 DHCP、DNS、TUN 或策略。" />
@@ -232,7 +235,7 @@ export function SourcesPage({ overview, onChanged, onNotify, onOpenNetwork, onDi
       </div>
     </section>
     <section className="section source-library">
-      <SectionTitle title="已导入快照" subtitle="刷新只产生新草稿；应用到运行中的网关需要再次完整校验。" />
+      <SectionTitle title="已导入快照" subtitle="刷新会更新订阅快照；动态节点池同步新增与删除节点，旧配置会提示迁移。" />
       {sources.length ? <div className="source-grid">{sources.map(source => {
         const versions = source.versions ?? []
         const inventory = source.effective_inventory ?? source.inventory
@@ -244,7 +247,7 @@ export function SourcesPage({ overview, onChanged, onNotify, onOpenNetwork, onDi
         const inUse = source.desired || source.applied || versions.some(version => version.desired || version.applied)
         const changed = diff?.previous_digest && diff.previous_digest !== source.digest
 		const overlayCompatible = source.overlay_compatible !== false
-		const sourceNeedsDrafts = (source.applied || source.desired) && draftsNeedApply
+		const sourceNeedsDrafts = (source.applied || source.desired) && (draftsNeedApply || source.composition_pending)
 		const state = t(sourceNeedsDrafts ? dnsNeedsApply ? overlayNeedsApply ? '附加配置与 DNS 待应用' : '自定义 DNS 待应用' : '附加配置待应用' : source.applied ? '运行版本' : source.desired ? running ? '待重载' : '下次启动版本' : previousApplied ? '新草稿' : source.valid && overlayCompatible ? '结构有效' : '存在冲突')
 		const action = t(sourceNeedsDrafts ? dnsNeedsApply ? running ? '应用配置与 DNS 并重载' : '保存配置与 DNS 到下次启动' : running ? '应用附加配置并重载' : '保存附加配置到下次启动' : source.applied ? '已运行' : source.desired ? running ? '应用并重载网关' : '等待下次启动' : running ? '校验、应用并重载' : '设为下次启动版本')
         const refreshing = activeAction?.kind === 'refresh' && activeAction.sourceID === source.id
@@ -253,6 +256,7 @@ export function SourcesPage({ overview, onChanged, onNotify, onOpenNetwork, onDi
         const exporting = activeAction?.kind === 'export' && activeAction.sourceID === source.id
         return <article className="source-card" key={source.id}>
           <div className="source-head"><div><small>{source.kind}</small><h3>{source.name}</h3></div><span className={sourceNeedsDrafts ? 'pill' : source.applied ? 'pill ok' : source.desired ? 'pill' : source.valid ? 'pill ok' : 'pill bad'}>{state}</span></div>
+          {source.pool_current && <p className="muted">{t('运行节点已同步；分流配置仍以已应用版本为准。')}</p>}
           <p className="source-origin" title={origin}><span aria-hidden="true">⌁</span>{origin}</p>
           {!isLANBrowser() && source.snapshot_display_path && <div className="source-location">
             <span className="source-location-icon" aria-hidden="true">▤</span>
@@ -279,7 +283,7 @@ export function SourcesPage({ overview, onChanged, onNotify, onOpenNetwork, onDi
 		  {versions.length > 0 && <small className="source-history">{t('历史：')}{versions.slice(-3).map(version => `${version.digest.slice(0, 8)}${version.applied ? ` (${t('运行')})` : version.desired ? ` (${t('待应用')})` : ''}`).join(' · ')}</small>}
 		  <div className="source-actions">
 			<button className="danger" type="button" disabled={busy || inUse || !revision} aria-label={t('删除来源 {{name}}', { name: source.name })} onClick={() => { setPending(null); setPendingDelete(source); setDeleteError('') }}>{t('删除来源')}</button>
-			{origin.startsWith('https://') && <button type="button" disabled={busy} onClick={() => void run({ kind: 'refresh', sourceID: source.id }, () => api.refreshSource(source.id), t('{{name}} 已刷新；新内容已保存为草稿。', { name: source.name }))}><ActionLabel active={refreshing} idle="刷新草稿" pending="正在刷新…" /></button>}
+			{origin.startsWith('https://') && <button type="button" disabled={busy} onClick={() => void run({ kind: 'refresh', sourceID: source.id }, () => api.refreshSource(source.id), t('{{name}} 已刷新；新内容已保存为草稿。', { name: source.name }))}><ActionLabel active={refreshing} idle="刷新订阅" pending="正在刷新…" /></button>}
 			<button className="primary" type="button" disabled={busy || dnsDirty || Boolean(dnsLoadError) || !customDNS || !revision || !source.valid || !overlayCompatible || (source.applied && !sourceNeedsDrafts) || (source.desired && !running && !sourceNeedsDrafts)} onClick={() => openApply(source)}>{action}</button>
             {dnsDirty && <small>{t('请先保存自定义 DNS 草稿，再应用配置。')}</small>}
           </div>

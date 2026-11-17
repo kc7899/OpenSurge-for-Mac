@@ -112,7 +112,7 @@ func appendImportedTailscaleExitCandidates(imported *importedProfile, cfg config
 		if err := group.Decode(&fields); err != nil {
 			return fmt.Errorf("read proxy group for Tailscale Exit Node candidates: %w", err)
 		}
-		if fields.Type != "select" || IsLocalRoutingGroup(fields.Name) || strings.HasPrefix(fields.Name, "device/") || fields.Name == config.TailscaleExitGroupName {
+		if fields.Name == "open-surge/stable-routing" || fields.Type != "select" || IsLocalRoutingGroup(fields.Name) || strings.HasPrefix(fields.Name, "device/") || fields.Name == config.TailscaleExitGroupName {
 			continue
 		}
 		alreadyPresent := false

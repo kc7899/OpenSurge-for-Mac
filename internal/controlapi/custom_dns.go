@@ -321,5 +321,8 @@ func (s *Server) composeDNSDraft(source []byte, overlay mihomo.ProfileOverlayDoc
 		return composed, fmt.Errorf("custom DNS: %w", err)
 	}
 	custom, err := mihomo.ComposeCustomDNS([]byte(composed.ProfileYAML), doc)
-	return custom.ProfileOverlayComposition, err
+	if err != nil {
+		return custom.ProfileOverlayComposition, err
+	}
+	return s.composeStableSources(custom.ProfileOverlayComposition)
 }

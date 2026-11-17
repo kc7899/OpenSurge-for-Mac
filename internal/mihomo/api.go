@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"open-mihomo-gateway/internal/config"
+	"open-mihomo-gateway/internal/routing"
 )
 
 type Version struct {
@@ -369,7 +370,11 @@ func fetchProxyHealthWithClient(ctx context.Context, cfg config.Config, client *
 	if err != nil {
 		return ProxyHealthSnapshot{}, err
 	}
+	if err := mergeStableProviderHealth(ctx, cfg, client, &body); err != nil {
+		return ProxyHealthSnapshot{}, err
+	}
 
+	labels := stablePolicyNames(cfg)
 	proxies := make([]ProxyHealth, 0, len(body.Proxies))
 	for name, proxy := range body.Proxies {
 		if proxy.Name == "" {
@@ -383,6 +388,9 @@ func fetchProxyHealthWithClient(ctx context.Context, cfg config.Config, client *
 			UDP:       proxy.UDP,
 			Status:    "untested",
 			Probeable: proxyIsProbeable(proxy.Type),
+		}
+		if label := labels[health.Name]; label != "" {
+			health.DisplayName = label
 		}
 		if health.Name == config.TailscaleProxyName && cfg.Tailscale.Enabled {
 			health.DisplayName = cfg.Tailscale.DisplayName
@@ -411,7 +419,7 @@ func fetchProxyHealthWithClient(ctx context.Context, cfg config.Config, client *
 			} else if health.Probeable {
 				health.Status = "unreachable"
 			}
-		} else if health.Probeable && proxy.Alive != nil {
+		} else if health.Probeable && proxy.Alive != nil && proxy.Provider != routing.PoolName {
 			if *proxy.Alive {
 				health.Status = "reachable"
 			} else if health.Probeable {
@@ -453,6 +461,14 @@ func measureProxyDelayWithClient(ctx context.Context, cfg config.Config, client 
 	query.Set("url", testURL)
 	query.Set("timeout", fmt.Sprintf("%d", timeout.Milliseconds()))
 	path := "/proxies/" + url.PathEscape(proxyName) + "/delay?" + query.Encode()
+	if pool, dynamic, err := stablePolicyPool(cfg); dynamic && err == nil {
+		for _, c := range pool.Graph.Candidates {
+			if c.ID == proxyName {
+				path = "/providers/proxies/" + url.PathEscape(routing.PoolName) + "/" + url.PathEscape(proxyName) + "/healthcheck?" + query.Encode()
+				break
+			}
+		}
+	}
 	req, err := newAPIRequest(ctx, cfg, http.MethodGet, path, nil)
 	if err != nil {
 		result.Status, result.Error = "error", err.Error()
@@ -472,6 +488,9 @@ func measureProxyDelayWithClient(ctx context.Context, cfg config.Config, client 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		message, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
 		result.Error = strings.TrimSpace(string(message))
+		if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+			result.Status = "error"
+		}
 		if resp.StatusCode == http.StatusGatewayTimeout || strings.Contains(strings.ToLower(result.Error), "timeout") || strings.Contains(strings.ToLower(result.Error), "deadline exceeded") {
 			result.Status = "timeout"
 		}
