@@ -75,7 +75,11 @@ func TestUbuntuGatewayDataPlaneNamespace(t *testing.T) {
 	// A foreign rule is kept byte-for-byte throughout startup and cleanup.
 	run("nft", "add", "table", "inet", "foreign_fixture")
 	foreign := run("nft", "-j", "list", "table", "inet", "foreign_fixture")
-	before, err := sysctl.New().Current()
+	globalBefore, err := sysctl.New().Current()
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := sysctl.NewForInterface("lan0").Current()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +181,7 @@ rules:
 	if err := manager.Stop(ctx); err != nil {
 		t.Fatal(err)
 	}
-	current, err := sysctl.New().Current()
+	current, err := sysctl.NewForInterface("lan0").Current()
 	if err != nil || current != before {
 		t.Fatal("forwarding not restored", before, current, err)
 	}
@@ -195,7 +199,7 @@ rules:
 	if err := New(bad).Start(ctx); err == nil {
 		t.Fatal("broken core start succeeded")
 	}
-	current, err = sysctl.New().Current()
+	current, err = sysctl.NewForInterface("lan0").Current()
 	if err != nil || current != before {
 		t.Fatal("failed start changed forwarding")
 	}
@@ -209,12 +213,15 @@ rules:
 	if err := New(cfg).Start(ctx); err == nil {
 		t.Fatal("DNS conflict startup unexpectedly succeeded")
 	}
-	current, err = sysctl.New().Current()
+	current, err = sysctl.NewForInterface("lan0").Current()
 	if err != nil || current != before {
 		t.Fatal("rollback did not restore forwarding", err)
 	}
 	if loaded, err := pf.New(cfg, runtime.NewPaths(cfg)).Loaded(); err != nil || loaded {
 		t.Fatal("rollback retained firewall", loaded, err)
+	}
+	if globalAfter, err := sysctl.New().Current(); err != nil || globalAfter != globalBefore {
+		t.Fatal("global ip_forward was modified", globalBefore, globalAfter, err)
 	}
 	t.Log("IPv4 downstream DNS, proxy, direct, reject, API selection without restart, core-loss guard, owned cleanup and startup failure passed; IPv6/Tailscale/host-resolved not asserted")
 }

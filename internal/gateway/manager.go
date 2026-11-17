@@ -30,7 +30,13 @@ type Manager struct {
 }
 
 func New(cfg config.Config) Manager {
-	return Manager{cfg: cfg, paths: runtime.NewPaths(cfg), deps: defaultGatewayDeps()}
+	return Manager{cfg: cfg, paths: runtime.NewPaths(cfg), deps: platformGatewayDeps(cfg)}
+}
+
+func platformGatewayDeps(cfg config.Config) gatewayDeps {
+	deps := defaultGatewayDeps()
+	deps.newSysctl = func() sysctlService { return sysctl.NewForInterface(cfg.Gateway.Interface) }
+	return deps
 }
 
 type dhcpService interface {
@@ -239,7 +245,7 @@ func appliedConfigFromState(cfg config.Config, state runtime.State) config.Confi
 
 func (m Manager) gatewayDeps() gatewayDeps {
 	if m.deps.geteuid == nil {
-		return defaultGatewayDeps()
+		return platformGatewayDeps(m.cfg)
 	}
 	return m.deps
 }

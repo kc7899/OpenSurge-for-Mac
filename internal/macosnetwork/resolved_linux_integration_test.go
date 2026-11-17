@@ -4,7 +4,9 @@ import (
 	"context"
 	"os"
 	"os/exec"
+	"os/user"
 	"reflect"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -33,6 +35,18 @@ func TestLinuxResolvedPrivateBusNamespace(t *testing.T) {
 	run("ip", "addr", "add", "192.0.2.10/24", "dev", "dnsfixture0")
 	run("ip", "link", "set", "dnsfixture0", "up")
 	if err := os.MkdirAll("/run/dbus", 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll("/run/systemd/resolve", 0755); err != nil {
+		t.Fatal(err)
+	}
+	account, err := user.Lookup("systemd-resolve")
+	if err != nil {
+		t.Fatal(err)
+	}
+	uid, _ := strconv.Atoi(account.Uid)
+	gid, _ := strconv.Atoi(account.Gid)
+	if err := os.Chown("/run/systemd/resolve", uid, gid); err != nil {
 		t.Fatal(err)
 	}
 	dbus := exec.Command("dbus-daemon", "--system", "--nofork", "--nopidfile")

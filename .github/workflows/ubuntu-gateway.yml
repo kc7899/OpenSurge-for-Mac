@@ -1,7 +1,5 @@
 name: Ubuntu gateway
 on:
-  push:
-    branches: [development/ubuntu-gateway]
   pull_request:
     branches: [development/stable-gateway]
 permissions:
@@ -34,6 +32,7 @@ jobs:
           OPENSURGE_RELEASE_TAG: v0.3.4-ubuntu.1
         run: make web-test web-build
       - uses: actions/cache@v4
+        id: mihomo-cache
         with:
           path: runtime/release-tools/cache
           key: ubuntu-mihomo-${{ runner.arch }}-${{ hashFiles('patches/mihomo/**', 'scripts/build-opensurge-mihomo.sh', 'scripts/mihomo-build-cache.py') }}
@@ -49,6 +48,11 @@ jobs:
             echo "Pinned core build attempt $attempt failed; retrying without changing inputs."
           done
           exit 1
+      - uses: actions/cache/save@v4
+        if: steps.mihomo-cache.outputs.cache-hit != 'true'
+        with:
+          path: runtime/release-tools/cache
+          key: ubuntu-mihomo-${{ runner.arch }}-${{ hashFiles('patches/mihomo/**', 'scripts/build-opensurge-mihomo.sh', 'scripts/mihomo-build-cache.py') }}
       - name: Real systemd-resolved on a private D-Bus and network namespace
         run: |
           go test -c -o "$RUNNER_TEMP/opensurge-network.test" ./internal/macosnetwork

@@ -12,7 +12,8 @@ export function UbuntuNetworkPage({ overview, onChanged }: { overview: Overview 
   const [error, setError] = useState('')
   const [saved, setSaved] = useState(false)
   const running = overview?.status.gateway === 'running'
-  const stopped = overview?.status.gateway === 'stopped'
+  const hasRuntime = running || overview?.status.runtime_state === 'active' || overview?.status.runtime_state === 'interrupted'
+  const stopped = overview?.status.gateway === 'stopped' && !overview.presentation?.busy
   useEffect(() => { void api.config().then(setConfig).catch(e => setError(String(e))) }, [])
   const save = async () => {
     if (!config) return
@@ -49,7 +50,7 @@ export function UbuntuNetworkPage({ overview, onChanged }: { overview: Overview 
       {!stopped && <p>{t('网关运行中或状态未确认时，不能修改网络设置。')}</p>}
       <div className="notice warn">{t('此预览版只接管 IPv4。通过 Ubuntu 转发的 IPv6 会被阻断，但设备仍可能通过主路由的 IPv6 绕过它。需在客户端移除该 IPv6 默认路由或关闭 IPv6。此版本不接管 DHCP、不修改 Tailnet ACL。')}</div>
       <p>{t('日常节点检测和线路切换不会重载网关。只有应用订阅结构或网络配置等明确操作才可能需要重新应用。')}</p>
-      <button id="gateway-control" disabled={busy || (!running && !stopped)} onClick={() => void lifecycle(running ? 'stop' : 'start')}>{t(busy ? '处理中…' : running ? '停止网关' : '启动网关')}</button>
+      <button id="gateway-control" disabled={busy || (!hasRuntime && !stopped)} onClick={() => void lifecycle(hasRuntime ? 'stop' : 'start')}>{t(busy ? '处理中…' : hasRuntime ? '停止网关' : '启动网关')}</button>
     </section>}
   </>
 }
