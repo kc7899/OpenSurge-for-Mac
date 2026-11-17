@@ -709,6 +709,7 @@ func (s *Server) readOverview(ctx context.Context, inventory bool) (Overview, er
 		warnings = append(warnings, "gateway runtime was interrupted by a system reboot; stop to clean stale state before starting again")
 	}
 	return Overview{
+		Platform:             hostPlatform(),
 		Presentation:         presentation,
 		SchemaVersion:        SchemaVersion,
 		Revision:             revision,

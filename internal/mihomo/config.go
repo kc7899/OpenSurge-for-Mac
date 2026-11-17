@@ -16,8 +16,11 @@ import (
 )
 
 const configTemplate = `mixed-port: {{ .MixedPort }}
-allow-lan: true
+{{ if .LinuxTUN }}allow-lan: false
+bind-address: "127.0.0.1"
+{{ else }}allow-lan: true
 bind-address: "*"
+{{ end }}
 mode: rule
 log-level: info
 ipv6: {{ .IPv6Enabled }}
@@ -61,7 +64,9 @@ geox-url:
 
 dns:
   enable: true
-  listen: 0.0.0.0:1053
+{{ if .LinuxTUN }}  listen: 127.0.0.1:1053
+{{ else }}  listen: 0.0.0.0:1053
+{{ end }}
   ipv6: {{ .DNSIPv6 }}
   enhanced-mode: fake-ip
   fake-ip-range: 198.18.0.1/16

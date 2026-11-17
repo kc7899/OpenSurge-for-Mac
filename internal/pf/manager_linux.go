@@ -28,6 +28,9 @@ func (m Manager) table() string {
 }
 func (m Manager) owner() string { return "OpenSurge owned gateway v1 " + m.table() }
 func (m Manager) Check() error {
+	if m.cfg.Gateway.Mode != config.GatewayModeSameLAN || m.cfg.DHCP.Enabled || !m.cfg.Transparent.TUNEnabled() || !m.cfg.Transparent.TUNAutoRoute || m.cfg.Transparent.MacTUNIPv6 || m.cfg.Transparent.TUNIPv6 != config.TUNIPv6Off || m.cfg.LocalSystemProxy.Enabled {
+		return fmt.Errorf("Ubuntu preview requires same_lan IPv4 TUN auto-route, DHCP off, host/downstream IPv6 takeover off and macOS system proxy off")
+	}
 	_, err := exec.LookPath("nft")
 	if err != nil {
 		return fmt.Errorf("nftables is required: %w", err)

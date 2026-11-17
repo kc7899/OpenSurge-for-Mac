@@ -21,6 +21,7 @@ import { ConnectivityPage } from './pages/ConnectivityPage'
 import { DevicesPage } from './pages/DevicesPage'
 import { DiagnosticsPage } from './pages/DiagnosticsPage'
 import { NetworkPage } from './pages/NetworkPage'
+import { UbuntuNetworkPage } from './pages/UbuntuNetworkPage'
 import { PoliciesPage, type PoliciesViewState } from './pages/PoliciesPage'
 import { SourcesPage } from './pages/SourcesPage'
 import { gatewayDisplayState, gatewayStatusDetail, gatewayStatusLabel, needsNetworkRecoveryWarning } from './status'
@@ -302,13 +303,13 @@ export function App() {
   const displayLabel = gatewayStatusLabel(displayState)
   const displayDetail = overviewConnection === 'connected' ? gatewayStatusDetail(overview?.presentation, overview?.drift, overview?.status.gateway) : ''
 
-  return <AppShell page={page} nav={nav} status={displayState} statusLabel={displayLabel} onNavigate={go} footer={<div className="sidebar-footer">
+  return <AppShell platform={overview?.platform} page={page} nav={nav} status={displayState} statusLabel={displayLabel} onNavigate={go} footer={<div className="sidebar-footer">
       <button type="button" className="sidebar-status" aria-label={t('快捷设置：{{status}}', { status: displayLabel })} aria-expanded={quickSettingsOpen} aria-controls="sidebar-quick-settings" onClick={() => setQuickSettingsOpen(open => !open)}><StatusDot status={displayState} /><span className="sidebar-status-copy"><strong>{displayLabel}</strong>{displayDetail && <small className="sidebar-status-detail">{displayDetail}</small>}<small>{import.meta.env.VITE_OPENSURGE_RELEASE_TAG} {releaseCodename(import.meta.env.VITE_OPENSURGE_RELEASE_TAG)}</small></span><svg className="sidebar-status-gear" viewBox="0 0 24 24" aria-hidden="true"><path fillRule="evenodd" d="M10 3h4l.5 2.3 1.3.8 2.2-.7 2 3.4-1.7 1.6v3.2l1.7 1.6-2 3.4-2.2-.7-1.3.8L14 21h-4l-.5-2.3-1.3-.8-2.2.7-2-3.4 1.7-1.6v-3.2L4 8.8l2-3.4 2.2.7 1.3-.8L10 3Zm5 9a3 3 0 1 0-6 0 3 3 0 0 0 6 0Z" /></svg></button>
       <div className={`sidebar-settings-reveal ${quickSettingsOpen ? 'expanded' : ''}`} id="sidebar-quick-settings" aria-hidden={!quickSettingsOpen} inert={!quickSettingsOpen}><div className="sidebar-settings-inner"><div className="sidebar-controls">
-        <label className="sidebar-control-row sidebar-switch" title={t('阻止空闲睡眠和合盖睡眠。合盖运行可能明显增加耗电与发热，请勿放入不通风的包内。')}>
+        {overview?.platform !== 'linux' && <label className="sidebar-control-row sidebar-switch" title={t('阻止空闲睡眠和合盖睡眠。合盖运行可能明显增加耗电与发热，请勿放入不通风的包内。')}>
           <span className="sidebar-control-copy"><strong>{t(sleepPreventionChanging ? '正在切换…' : '合盖保持运行')}</strong><small>{t(overview?.sleep_prevention?.active ? '系统睡眠已临时禁用' : '默认关闭 · 本次运行有效')}</small></span>
           <input type="checkbox" checked={overview?.sleep_prevention?.active ?? false} disabled={!overview || sleepPreventionChanging} onChange={event => void setSleepPrevention(event.target.checked)} />
-        </label>
+        </label>}
         {overview?.sleep_prevention?.error && <small className="sidebar-control-error" role="status">{overview.sleep_prevention.error}</small>}
         <LanguageSelector language={language} changing={languageChanging} onChange={next => { void changeLanguage(next).then(changed => { if (changed) void refresh() }) }} />
         <label className="sidebar-control-row sidebar-switch">
@@ -332,7 +333,8 @@ export function App() {
         <DeviceTrafficProvider gateway={overview?.status.gateway}>
           <PageErrorBoundary key={page}>
             {page === 'dashboard' && <DashboardPage overview={overview} onOpenConnections={openConnections} onOpenNetwork={action => go('network', action === 'cleanup' ? 'control' : action === 'stop' ? 'bottom' : 'none')} />}
-            {page === 'network' && <NetworkPage overview={overview} onChanged={refresh} onNavigate={() => go('devices')} onNotify={notify} onOpenCustomDNS={() => {
+            {page === 'network' && overview?.platform === 'linux' && <UbuntuNetworkPage overview={overview} onChanged={refresh} />}
+            {page === 'network' && overview?.platform !== 'linux' && <NetworkPage overview={overview} onChanged={refresh} onNavigate={() => go('devices')} onNotify={notify} onOpenCustomDNS={() => {
               if (!go('sources')) return
               history.replaceState({}, '', '/sources#custom-dns')
               setSourcesNavigationRequest(request => request + 1)

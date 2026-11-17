@@ -1,0 +1,26 @@
+[Unit]
+Description=OpenSurge privileged gateway helper
+After=network-online.target systemd-resolved.service
+Wants=network-online.target
+Before=opensurge-control.service
+ConditionPathExists=/var/lib/opensurge/config.yaml
+
+[Service]
+Type=simple
+User=root
+Group=opensurge
+UMask=0027
+RuntimeDirectory=opensurge
+RuntimeDirectoryMode=0750
+ExecStart=/usr/lib/opensurge/opensurge-helper --socket /run/opensurge/helper.sock --allowed-config-root /var/lib/opensurge --socket-group opensurge
+# The existing lifecycle restores owned DNS/firewall/forwarding before children
+# are signalled. Stopping this service intentionally stops the gateway.
+ExecStop=/usr/lib/opensurge/omg stop --config /var/lib/opensurge/config.yaml
+TimeoutStopSec=90
+KillMode=control-group
+Restart=no
+PrivateTmp=yes
+ProtectHome=yes
+
+[Install]
+WantedBy=multi-user.target

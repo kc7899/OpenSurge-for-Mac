@@ -684,15 +684,25 @@ func requireTrustedRuntime(cfg config.Config, allowedRoot string) error {
 }
 
 func requireTrustedStartInputs(cfg config.Config, allowedRoot string) error {
-	for name, path := range map[string]string{"mihomo.binary": cfg.Mihomo.Binary} {
-		if err := requireTrustedFile(path, allowedRoot, true); err != nil {
-			return fmt.Errorf("%s: %w", name, err)
-		}
+	if err := requireTrustedCoreInputs(cfg, allowedRoot); err != nil {
+		return err
 	}
 	if cfg.DHCP.Enabled {
 		if err := requireTrustedFile(cfg.DHCP.Binary, allowedRoot, true); err != nil {
 			return fmt.Errorf("dhcp.binary: %w", err)
 		}
+	}
+	if hostPlatform() == "linux" && cfg.Gateway.SameLAN() {
+		if err := requireLinuxDNSBinary(cfg.DHCP.Binary); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func requireTrustedCoreInputs(cfg config.Config, allowedRoot string) error {
+	if err := requireTrustedFile(cfg.Mihomo.Binary, allowedRoot, true); err != nil {
+		return fmt.Errorf("mihomo.binary: %w", err)
 	}
 	return requireTrustedProfileInputs(cfg, allowedRoot)
 }
@@ -708,7 +718,7 @@ func requireTrustedRestartInputs(cfg config.Config, allowedRoot string) error {
 	restart := cfg
 	restart.DHCP.Enabled = false
 	restart.DevicePolicy.File = ""
-	return requireTrustedStartInputs(restart, allowedRoot)
+	return requireTrustedCoreInputs(restart, allowedRoot)
 }
 
 func requireTrustedProfileInputs(cfg config.Config, allowedRoot string) error {
@@ -756,7 +766,7 @@ func requireTrustedProfileInputs(cfg config.Config, allowedRoot string) error {
 func requireTrustedPreparedInputs(cfg config.Config, allowedRoot string) error {
 	prepared := cfg
 	prepared.DHCP.Enabled = false
-	return requireTrustedStartInputs(prepared, allowedRoot)
+	return requireTrustedCoreInputs(prepared, allowedRoot)
 }
 
 func requireTrustedDirectory(path, allowedRoot string) error {

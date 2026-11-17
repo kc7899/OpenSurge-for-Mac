@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"time"
 
@@ -35,7 +36,7 @@ func Run(cfg config.Config) Report {
 		checkPath("dnsmasq", cfg.DHCP.Binary),
 		checkPath("mihomo", cfg.Mihomo.Binary),
 		checkMihomoConfigRender(cfg),
-		checkCommand("pfctl", "pfctl"),
+		checkFirewall(),
 		checkInterface(cfg.Gateway.Interface),
 		checkInterface(cfg.Gateway.UpstreamInterface),
 		checkGatewayInterfaceTopology(cfg.Gateway),
@@ -69,6 +70,13 @@ func Run(cfg config.Config) Report {
 		}
 	}
 	return Report{Checks: checks}
+}
+
+func checkFirewall() Check {
+	if goruntime.GOOS == "linux" {
+		return checkCommand("nftables", "nft")
+	}
+	return checkCommand("pfctl", "pfctl")
 }
 
 func checkIPv6PacketBroker(cfg config.Config) Check {

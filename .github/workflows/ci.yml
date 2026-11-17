@@ -37,6 +37,7 @@ jobs:
       - run: make web-test web-build
 
   desktop:
+    if: github.head_ref != 'development/ubuntu-gateway' && github.ref != 'refs/heads/development/ubuntu-gateway'
     name: Desktop build (${{ matrix.arch }})
     runs-on: macos-15
     strategy:

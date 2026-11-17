@@ -9,7 +9,7 @@ permissions:
 jobs:
   linux:
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -17,10 +17,51 @@ jobs:
           go-version-file: go.mod
           cache: true
       - name: Install namespace test dependencies
-        run: sudo apt-get update && sudo apt-get install -y nftables iproute2 dnsmasq-base
+        run: sudo apt-get update && sudo apt-get install -y nftables iproute2 dnsmasq-base dnsutils
       - name: Unit tests
         run: go test ./...
       - name: Firewall ownership in a private network namespace
         run: |
           go test -c -o "$RUNNER_TEMP/opensurge-pf.test" ./internal/pf
           sudo env OPENSURGE_LINUX_NETWORK_TEST=1 unshare --net "$RUNNER_TEMP/opensurge-pf.test" -test.run '^TestLinuxFirewallOwnedLifecycleNamespace$' -test.v
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - run: npm install --global pnpm@11.19.0
+      - run: pnpm --dir web install --frozen-lockfile
+      - name: Shared Web tests and Ubuntu UI build
+        env:
+          VITE_OPENSURGE_RELEASE_TAG: v0.3.4-ubuntu.1
+        run: make web-test web-build
+      - uses: actions/cache@v4
+        with:
+          path: runtime/release-tools/cache
+          key: ubuntu-mihomo-${{ runner.arch }}-${{ hashFiles('patches/mihomo/**', 'scripts/build-opensurge-mihomo.sh', 'scripts/mihomo-build-cache.py') }}
+      - name: Build pinned Linux Mihomo
+        env:
+          OPENSURGE_MIHOMO_OS: linux
+          OPENSURGE_MIHOMO_ARCH: amd64
+          OPENSURGE_MIHOMO_OUTPUT: ${{ github.workspace }}/bin/mihomo-linux-amd64
+        run: ./scripts/build-opensurge-mihomo.sh
+      - name: Existing real-core stable provider and policy integration
+        env:
+          OPENSURGE_TEST_CORE: ${{ github.workspace }}/bin/mihomo-linux-amd64
+        run: go test ./internal/controlapi ./internal/mihomo ./internal/routing -count=1
+      - name: Offline IPv4 gateway data plane in private mount and network namespaces
+        run: |
+          go test -c -o "$RUNNER_TEMP/opensurge-gateway.test" ./internal/gateway
+          sudo env OPENSURGE_LINUX_NETWORK_TEST=1 OPENSURGE_TEST_CORE="$PWD/bin/mihomo-linux-amd64" OPENSURGE_LINUX_FIXTURE="$PWD/scripts/ubuntu-network-fixture.py" unshare --mount --net bash -euc '
+            mount --make-rprivate /
+            mount -t tmpfs tmpfs /run
+            mkdir -p /run/netns
+            test -c /dev/net/tun || { mkdir -p /dev/net; mknod /dev/net/tun c 10 200; }
+            exec "$1" -test.run "^TestUbuntuGatewayDataPlaneNamespace$" -test.v
+          ' _ "$RUNNER_TEMP/opensurge-gateway.test"
+      - name: Build Debian installer
+        run: ./scripts/build-ubuntu-deb.sh
+      - name: Install, Web authentication, upgrade and remove
+        run: ./scripts/test-ubuntu-package.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: opensurge-ubuntu-24.04-amd64-preview
+          path: artifacts/ubuntu/*

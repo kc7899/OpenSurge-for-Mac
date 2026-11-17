@@ -1,0 +1,20 @@
+#!/bin/sh
+set -eu
+case "$1" in
+ configure)
+  getent group opensurge >/dev/null || addgroup --system opensurge
+  id opensurge >/dev/null 2>&1 || adduser --system --ingroup opensurge --home /var/lib/opensurge/control --no-create-home --disabled-login opensurge
+  install -d -o root -g opensurge -m 2750 /var/lib/opensurge /var/lib/opensurge/bin /var/lib/opensurge/data /var/lib/opensurge/runtime /var/lib/opensurge/runtime/logs
+  install -d -o opensurge -g opensurge -m 0700 /var/lib/opensurge/control
+  install -o root -g opensurge -m 0750 /usr/lib/opensurge/mihomo /var/lib/opensurge/bin/mihomo
+  /usr/sbin/opensurge-admin init
+  chown root:opensurge /var/lib/opensurge/config.yaml
+  chmod 0640 /var/lib/opensurge/config.yaml
+  if [ -d /run/systemd/system ]; then
+   systemctl daemon-reload
+   systemctl enable opensurge-helper.service opensurge-control.service
+   systemctl start opensurge-helper.service opensurge-control.service
+  fi
+  echo 'OpenSurge installed. Network gateway remains stopped. Use sudo opensurge-admin console for Web access.'
+ ;;
+esac

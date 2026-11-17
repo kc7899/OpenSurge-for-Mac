@@ -25,6 +25,7 @@ type ErrorResponse struct {
 }
 
 type Overview struct {
+	Platform             string                   `json:"platform"`
 	Presentation         gatewayview.Status       `json:"presentation"`
 	SchemaVersion        int                      `json:"schema_version"`
 	Revision             string                   `json:"revision"`

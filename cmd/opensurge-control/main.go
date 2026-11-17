@@ -18,6 +18,7 @@ func main() {
 	storeDir := flag.String("store", "", "application support directory")
 	helperSocket := flag.String("helper-socket", "/var/run/opensurge/helper.sock", "privileged helper socket")
 	direct := flag.Bool("direct-root", false, "run actions directly; requires root and is intended for development")
+	quietBootstrap := flag.Bool("quiet-bootstrap", false, "do not write a browser login link to service logs")
 	flag.Parse()
 
 	runner := controlapi.ActionRunner(controlapi.HelperClient{SocketPath: *helperSocket})
@@ -38,7 +39,9 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	fmt.Printf("OpenSurge Control API: %s\n", *addr)
-	fmt.Printf("Open Web GUI: %s\n", server.BootstrapURL())
+	if !*quietBootstrap {
+		fmt.Printf("Open Web GUI: %s\n", server.BootstrapURL())
+	}
 	if err := server.Serve(ctx); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
