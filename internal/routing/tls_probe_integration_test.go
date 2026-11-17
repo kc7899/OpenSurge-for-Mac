@@ -263,6 +263,7 @@ func TestCertificateFailoverThroughRealIsolatedCore(t *testing.T) {
 			return ProbeResult{Reachable: true, Country: "US", IP: "203.0.113.1", DelayMS: 10}
 		}
 		r, e := probeNodeWithServiceTrust(ctx, binary, nodes[c.ID], target, chatGPTTLSHosts, roots, networks...)
+		t.Logf("fixture %s: reachable=%t, host=%s, certificate=%s, infrastructure=%v", c.Name, r.Reachable, r.ServiceHost, r.CertificateError, e)
 		if e != nil {
 			return ProbeResult{InfrastructureError: true}
 		}

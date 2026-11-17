@@ -74,6 +74,8 @@ jobs:
           go test ./internal/controlapi ./internal/mihomo ./internal/routing -count=1
           go test -c -o "$RUNNER_TEMP/opensurge-routing.test" ./internal/routing
           sudo env OPENSURGE_TEST_CORE="$OPENSURGE_TEST_CORE" OPENSURGE_TEST_BIND_UPLINK=1 "$RUNNER_TEMP/opensurge-routing.test" -test.run '^TestCertificateFailoverThroughRealIsolatedCore$' -test.v
+          go test -c -o "$RUNNER_TEMP/opensurge-control.test" ./internal/controlapi
+          sudo env OPENSURGE_TEST_CORE="$OPENSURGE_TEST_CORE" "$RUNNER_TEMP/opensurge-control.test" -test.run '^TestRootStableProbeUsesSavedNodeAndRejectsDrift$' -test.v
       - name: Offline IPv4 gateway data plane in private mount and network namespaces
         if: ${{ !cancelled() && steps.core-build.outcome == 'success' }}
         run: |

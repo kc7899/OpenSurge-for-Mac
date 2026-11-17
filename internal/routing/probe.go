@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -119,10 +120,30 @@ func probeNodeWithServiceTrust(ctx context.Context, binary string, node map[stri
 			_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
 			_ = response.Body.Close()
 			if response.StatusCode == http.StatusOK {
+				// Proxy inventory is published before routing rules. Without this
+				// second fence the first TLS request can hit an incomplete graph.
+				rulesRequest, _ := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("http://127.0.0.1:%d/rules", apiPort), nil)
+				rulesRequest.Header.Set("Authorization", "Bearer "+secret)
+				rulesReady := false
+				if rulesResponse, err := readyClient.Do(rulesRequest); err == nil {
+					var data struct {
+						Rules []struct{ Type, Proxy string } `json:"rules"`
+					}
+					if rulesResponse.StatusCode == 200 && json.NewDecoder(io.LimitReader(rulesResponse.Body, 65536)).Decode(&data) == nil {
+						for _, r := range data.Rules {
+							if strings.EqualFold(r.Type, "match") && r.Proxy == name {
+								rulesReady = true
+							}
+						}
+					}
+					_ = rulesResponse.Body.Close()
+				}
 				if conn, e := net.DialTimeout("tcp4", address, 20*time.Millisecond); e == nil {
 					_ = conn.Close()
-					ready = true
-					break
+					if rulesReady {
+						ready = true
+						break
+					}
 				}
 			}
 		}
