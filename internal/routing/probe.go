@@ -2,7 +2,9 @@ package routing
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/x509"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net"
@@ -39,6 +41,20 @@ func probeNodeWithServiceTrust(ctx context.Context, binary string, node map[stri
 	}
 	port := listener.Addr().(*net.TCPAddr).Port
 	_ = listener.Close()
+	apiPort := port
+	for apiPort == port {
+		l, e := net.Listen("tcp4", "127.0.0.1:0")
+		if e != nil {
+			return ProbeResult{}, e
+		}
+		apiPort = l.Addr().(*net.TCPAddr).Port
+		_ = l.Close()
+	}
+	secretBytes := make([]byte, 24)
+	if _, err := rand.Read(secretBytes); err != nil {
+		return ProbeResult{}, err
+	}
+	secret := hex.EncodeToString(secretBytes)
 	name, _ := node["name"].(string)
 	if name == "" {
 		return ProbeResult{}, fmt.Errorf("node name missing")
@@ -47,6 +63,7 @@ func probeNodeWithServiceTrust(ctx context.Context, binary string, node map[stri
 		return ProbeResult{}, fmt.Errorf("unresolved probe dependency")
 	}
 	doc := map[string]any{"mixed-port": port, "bind-address": "127.0.0.1", "allow-lan": false, "mode": "rule", "log-level": "silent", "ipv6": false, "tun": map[string]any{"enable": false}, "proxies": []any{node}, "rules": []string{"MATCH," + name}, "dns": map[string]any{"enable": true, "nameserver": []string{"1.1.1.1", "8.8.8.8"}, "proxy-server-nameserver": []string{"1.1.1.1", "8.8.8.8"}}}
+	doc["external-controller"], doc["secret"] = fmt.Sprintf("127.0.0.1:%d", apiPort), secret
 	data, err := yaml.Marshal(doc)
 	if err != nil {
 		return ProbeResult{}, fmt.Errorf("cannot compose isolated probe")
@@ -63,13 +80,25 @@ func probeNodeWithServiceTrust(ctx context.Context, binary string, node map[stri
 	}
 	defer func() { _ = cmd.Process.Kill(); _ = cmd.Wait() }()
 	address := fmt.Sprintf("127.0.0.1:%d", port)
+	readyTransport := &http.Transport{Proxy: nil}
+	defer readyTransport.CloseIdleConnections()
+	readyClient := &http.Client{Transport: readyTransport, Timeout: 200 * time.Millisecond}
 	ready := false
 	for i := 0; i < 100; i++ {
-		conn, err := net.DialTimeout("tcp4", address, 20*time.Millisecond)
-		if err == nil {
-			_ = conn.Close()
-			ready = true
-			break
+		// A listening mixed port can precede the loaded proxy graph. Confirm
+		// the intended node before treating a transport/TLS failure as evidence.
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("http://127.0.0.1:%d/proxies/", apiPort)+url.PathEscape(name), nil)
+		req.Header.Set("Authorization", "Bearer "+secret)
+		if response, e := readyClient.Do(req); e == nil {
+			_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
+			_ = response.Body.Close()
+			if response.StatusCode == http.StatusOK {
+				if conn, e := net.DialTimeout("tcp4", address, 20*time.Millisecond); e == nil {
+					_ = conn.Close()
+					ready = true
+					break
+				}
+			}
 		}
 		select {
 		case <-ctx.Done():

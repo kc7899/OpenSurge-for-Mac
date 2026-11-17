@@ -437,7 +437,7 @@ func TestManagedPoolFallbackAndRefreshRealCore(t *testing.T) {
 	}
 	ready := false
 	for i := 0; i < 100; i++ {
-		if _, code, e := call("GET", "/version", ""); e == nil && code == 200 {
+		if _, code, e := call("GET", "/proxies/"+url.PathEscape(GroupName), ""); e == nil && code == 200 {
 			ready = true
 			break
 		}

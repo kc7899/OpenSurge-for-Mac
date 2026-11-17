@@ -11,11 +11,11 @@ sudo apt-get install -y "$PKG"
 sudo systemctl is-active --quiet opensurge-helper opensurge-control
 sudo systemd-analyze verify /usr/lib/systemd/system/opensurge-{helper,control}.service
 # Service installation must not start a gateway or advertise/alter addressing.
-test ! -e /var/lib/opensurge/runtime/state.json
+sudo test ! -e /var/lib/opensurge/runtime/state.json
 if ip link show opensurge0 >/dev/null 2>&1; then echo 'Installer started TUN unexpectedly' >&2; exit 1; fi
 test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:61767/api/v1/overview)" == 401
-[[ "$(stat -c %U:%G:%a /var/lib/opensurge/config.yaml)" == root:opensurge:640 ]]
-[[ "$(stat -c %U:%G:%a /var/lib/opensurge/control/control-token)" == opensurge:opensurge:600 ]]
+[[ "$(sudo stat -c %U:%G:%a /var/lib/opensurge/config.yaml)" == root:opensurge:640 ]]
+[[ "$(sudo stat -c %U:%G:%a /var/lib/opensurge/control/control-token)" == opensurge:opensurge:600 ]]
 WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 # Keep administrator login links/cookies private and out of CI logs.
 sudo opensurge-admin console > "$WORK/console"
@@ -53,14 +53,14 @@ o = json.load(open(sys.argv[1]))
 assert o['status']['gateway'] == 'stopped', o['status']
 assert not o.get('status_error'), o.get('status_error')
 PY
-test ! -e /var/lib/opensurge/runtime/state.json
+sudo test ! -e /var/lib/opensurge/runtime/state.json
 # Upgrade preserves the generated core secret and private control store.
 sudo cp /var/lib/opensurge/config.yaml "$WORK/config"
 sudo sha256sum /var/lib/opensurge/control/control-token | cut -d' ' -f1 > "$WORK/token-digest"
 sudo apt-get install --reinstall -y "$PKG"
 sudo cmp "$WORK/config" /var/lib/opensurge/config.yaml
 sudo sha256sum /var/lib/opensurge/control/control-token | cut -d' ' -f1 | cmp - "$WORK/token-digest"
-test ! -e /var/lib/opensurge/runtime/state.json
+sudo test ! -e /var/lib/opensurge/runtime/state.json
 sudo apt-get remove -y opensurge-gateway
 sudo cmp "$WORK/config" /var/lib/opensurge/config.yaml
 if systemctl is-active --quiet opensurge-control; then echo 'Control service still active after removal' >&2; exit 1; fi

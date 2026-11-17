@@ -138,10 +138,16 @@ func (s *tlsCoreSelector) Current(ctx context.Context) (string, error) {
 		return "", e
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("selector not ready: %d", resp.StatusCode)
+	}
 	var g struct {
 		Now string `json:"now"`
 	}
 	e = json.NewDecoder(resp.Body).Decode(&g)
+	if e == nil && g.Now == "" {
+		e = fmt.Errorf("selector has no actual choice")
+	}
 	return g.Now, e
 }
 func (s *tlsCoreSelector) Select(ctx context.Context, id string) error {
