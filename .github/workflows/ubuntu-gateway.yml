@@ -31,7 +31,7 @@ jobs:
       - run: pnpm --dir web install --frozen-lockfile
       - name: Shared Web tests and Ubuntu UI build
         env:
-          VITE_OPENSURGE_RELEASE_TAG: v0.3.4-ubuntu.1
+          OPENSURGE_RELEASE_TAG: v0.3.4-ubuntu.1
         run: make web-test web-build
       - uses: actions/cache@v4
         with:

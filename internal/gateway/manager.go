@@ -491,6 +491,40 @@ func (m Manager) startWithCommit(ctx context.Context, commit func() error) error
 		}
 		return nil
 	}
+	earlyFirewall := false
+	if policy, ok := pfManager.(interface{ BeforeForwarding() bool }); ok {
+		earlyFirewall = policy.BeforeForwarding()
+	}
+	loadFirewall := func() error {
+		ReportProgress(ctx, "applying_firewall")
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if earlyFirewall {
+			// Persist ownership intent before the atomic Linux table mutation.
+			state.PFAnchorLoaded = true
+			if err := deps.saveState(m.paths.StateFile, state); err != nil {
+				return err
+			}
+		}
+		if err := pfManager.Load(!pfEnabledBefore); err != nil {
+			return err
+		}
+		state.PFAnchorLoaded = true
+		loaded, err := pfManager.Loaded()
+		if err != nil {
+			return err
+		}
+		if !loaded {
+			return fmt.Errorf("firewall %s did not become visible after load", m.cfg.PF.AnchorName)
+		}
+		return deps.saveState(m.paths.StateFile, state)
+	}
+	if earlyFirewall {
+		if err := loadFirewall(); err != nil {
+			return m.rollback(ctx, err, state, dhcpManager, mihomoManager, pfManager, sysctlManager, systemProxyManager, false)
+		}
+	}
 
 	ReportProgress(ctx, "enabling_forwarding")
 	if err := checkCanceled(); err != nil {
@@ -584,23 +618,10 @@ func (m Manager) startWithCommit(ctx context.Context, commit func() error) error
 		return m.rollback(ctx, err, state, dhcpManager, mihomoManager, pfManager, sysctlManager, systemProxyManager, false)
 	}
 
-	ReportProgress(ctx, "applying_firewall")
-	if err := checkCanceled(); err != nil {
-		return err
-	}
-	if err := pfManager.Load(!pfEnabledBefore); err != nil {
-		return m.rollback(ctx, err, state, dhcpManager, mihomoManager, pfManager, sysctlManager, systemProxyManager, false)
-	}
-	state.PFAnchorLoaded = true
-	loaded, err := pfManager.Loaded()
-	if err != nil {
-		return m.rollback(ctx, err, state, dhcpManager, mihomoManager, pfManager, sysctlManager, systemProxyManager, false)
-	}
-	if !loaded {
-		return m.rollback(ctx, fmt.Errorf("pf anchor %s did not become visible after load", m.cfg.PF.AnchorName), state, dhcpManager, mihomoManager, pfManager, sysctlManager, systemProxyManager, false)
-	}
-	if err := deps.saveState(m.paths.StateFile, state); err != nil {
-		return m.rollback(ctx, err, state, dhcpManager, mihomoManager, pfManager, sysctlManager, systemProxyManager, false)
+	if !earlyFirewall {
+		if err := loadFirewall(); err != nil {
+			return m.rollback(ctx, err, state, dhcpManager, mihomoManager, pfManager, sysctlManager, systemProxyManager, false)
+		}
 	}
 	if state.LocalSystemDNS != nil {
 		ReportProgress(ctx, "enabling_system_dns")

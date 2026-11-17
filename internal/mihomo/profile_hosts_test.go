@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -93,8 +94,12 @@ rules: ['MATCH,Proxy']
 					if err != nil {
 						t.Fatal(err)
 					}
+					gatewayListen := "0.0.0.0:1053"
+					if runtime.GOOS == "linux" {
+						gatewayListen = "127.0.0.1:1053"
+					}
 					for _, stage := range []struct{ name, body, listen, resolver string }{
-						{"gateway", final, "0.0.0.0:1053", "udp://127.0.0.1:1053"},
+						{"gateway", final, gatewayListen, "udp://127.0.0.1:1053"},
 						{"prepared", prepared, "127.0.0.1:19053", "udp://127.0.0.1:19053"},
 					} {
 						document := assertHosts(stage.name, stage.body)

@@ -35,8 +35,17 @@ func (m Manager) Check() error {
 	if err != nil {
 		return fmt.Errorf("nftables is required: %w", err)
 	}
+	if loaded, err := m.Loaded(); err != nil {
+		return err
+	} else if loaded {
+		return fmt.Errorf("owned nftables table already exists; recover the previous gateway before starting")
+	}
 	return nil
 }
+
+// Install the fail-closed guard before enabling forwarding or starting TUN.
+// Other platform firewall managers retain their existing lifecycle order.
+func (m Manager) BeforeForwarding() bool { return true }
 func (m Manager) Enabled() (bool, error) {
 	if err := m.Check(); err != nil {
 		return false, err
@@ -71,8 +80,12 @@ func (m Manager) render() (string, error) {
   type nat hook postrouting priority srcnat; policy accept;
   ip saddr %s ip daddr != %s oifname %s counter masquerade
  }
+ chain no_redirects {
+  type filter hook output priority filter; policy accept;
+  oifname %s icmp type redirect counter drop
+ }
 }
-`, m.table(), strconv.Quote(m.owner()), guard, lan, scope.String(), scope.String(), upstream), nil
+`, m.table(), strconv.Quote(m.owner()), guard, lan, scope.String(), scope.String(), upstream, lan), nil
 }
 func (m Manager) Loaded() (bool, error) {
 	raw, err := process.Output("nft", "-j", "list", "tables")

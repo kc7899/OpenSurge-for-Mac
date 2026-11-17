@@ -684,8 +684,8 @@ func requireTrustedRuntime(cfg config.Config, allowedRoot string) error {
 }
 
 func requireTrustedStartInputs(cfg config.Config, allowedRoot string) error {
-	if err := requireTrustedCoreInputs(cfg, allowedRoot); err != nil {
-		return err
+	if err := requireTrustedFile(cfg.Mihomo.Binary, allowedRoot, true); err != nil {
+		return fmt.Errorf("mihomo.binary: %w", err)
 	}
 	if cfg.DHCP.Enabled {
 		if err := requireTrustedFile(cfg.DHCP.Binary, allowedRoot, true); err != nil {
@@ -697,7 +697,7 @@ func requireTrustedStartInputs(cfg config.Config, allowedRoot string) error {
 			return err
 		}
 	}
-	return nil
+	return requireTrustedProfileInputs(cfg, allowedRoot)
 }
 
 func requireTrustedCoreInputs(cfg config.Config, allowedRoot string) error {
