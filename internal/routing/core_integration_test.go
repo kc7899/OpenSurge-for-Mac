@@ -131,7 +131,9 @@ rules:
 	}
 	ready := false
 	for i := 0; i < 100; i++ {
-		if _, code, e := request("GET", "/version", ""); e == nil && code == 200 {
+		// The controller listener becomes available before proxy groups finish
+		// loading on Linux. A version response alone is not data-plane readiness.
+		if _, code, e := request("GET", "/proxies/Stable", ""); e == nil && code == 200 {
 			ready = true
 			break
 		}

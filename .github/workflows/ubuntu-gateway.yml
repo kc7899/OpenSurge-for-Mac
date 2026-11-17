@@ -10,6 +10,8 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -28,6 +30,7 @@ jobs:
       - run: npm install --global pnpm@11.19.0
       - run: pnpm --dir web install --frozen-lockfile
       - name: Shared Web tests and Ubuntu UI build
+        id: web-build
         env:
           OPENSURGE_RELEASE_TAG: v0.3.4-ubuntu.1
         run: make web-test web-build
@@ -37,6 +40,7 @@ jobs:
           path: runtime/release-tools/cache
           key: ubuntu-mihomo-${{ runner.arch }}-${{ hashFiles('patches/mihomo/**', 'scripts/build-opensurge-mihomo.sh', 'scripts/mihomo-build-cache.py') }}
       - name: Build pinned Linux Mihomo
+        id: core-build
         env:
           OPENSURGE_MIHOMO_OS: linux
           OPENSURGE_MIHOMO_ARCH: amd64
@@ -54,6 +58,7 @@ jobs:
           path: runtime/release-tools/cache
           key: ubuntu-mihomo-${{ runner.arch }}-${{ hashFiles('patches/mihomo/**', 'scripts/build-opensurge-mihomo.sh', 'scripts/mihomo-build-cache.py') }}
       - name: Real systemd-resolved on a private D-Bus and network namespace
+        if: ${{ !cancelled() && steps.core-build.outcome == 'success' }}
         run: |
           go test -c -o "$RUNNER_TEMP/opensurge-network.test" ./internal/macosnetwork
           sudo env OPENSURGE_LINUX_NETWORK_TEST=1 unshare --mount --net bash -euc '
@@ -62,10 +67,12 @@ jobs:
             exec "$1" -test.run "^TestLinuxResolvedPrivateBusNamespace$" -test.v
           ' _ "$RUNNER_TEMP/opensurge-network.test"
       - name: Existing real-core stable provider and policy integration
+        if: ${{ !cancelled() && steps.core-build.outcome == 'success' }}
         env:
           OPENSURGE_TEST_CORE: ${{ github.workspace }}/bin/mihomo-linux-amd64
         run: go test ./internal/controlapi ./internal/mihomo ./internal/routing -count=1
       - name: Offline IPv4 gateway data plane in private mount and network namespaces
+        if: ${{ !cancelled() && steps.core-build.outcome == 'success' }}
         run: |
           go test -c -o "$RUNNER_TEMP/opensurge-gateway.test" ./internal/gateway
           sudo env OPENSURGE_LINUX_NETWORK_TEST=1 OPENSURGE_TEST_CORE="$PWD/bin/mihomo-linux-amd64" OPENSURGE_LINUX_FIXTURE="$PWD/scripts/ubuntu-network-fixture.py" unshare --mount --net bash -euc '
@@ -76,8 +83,11 @@ jobs:
             exec "$1" -test.run "^TestUbuntuGatewayDataPlaneNamespace$" -test.v
           ' _ "$RUNNER_TEMP/opensurge-gateway.test"
       - name: Build Debian installer
+        id: deb-build
+        if: ${{ !cancelled() && steps.core-build.outcome == 'success' && steps.web-build.outcome == 'success' }}
         run: ./scripts/build-ubuntu-deb.sh
       - name: Install, Web authentication, upgrade and remove
+        if: ${{ !cancelled() && steps.deb-build.outcome == 'success' }}
         run: ./scripts/test-ubuntu-package.sh
       - uses: actions/upload-artifact@v4
         with:

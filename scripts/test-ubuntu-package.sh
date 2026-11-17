@@ -33,6 +33,27 @@ assert o['status']['gateway'] == 'stopped', o['status']
 PY
 curl -fsS -b "$WORK/cookies" http://127.0.0.1:61767/network > "$WORK/ui.html"
 grep -q '/assets/' "$WORK/ui.html"
+# Prove the non-root Web service can import a synthetic source and apply it
+# through the fixed root helper, without taking over any runner network.
+cat > "$WORK/fixture.yaml" <<'EOF'
+proxies:
+  - {name: 'US offline fixture', type: http, server: 192.0.2.1, port: 9}
+proxy-groups:
+  - {name: Proxy, type: select, proxies: ['US offline fixture']}
+rules: [MATCH,REJECT]
+EOF
+curl -fsS -b "$WORK/cookies" -H 'Origin: http://127.0.0.1:16167' -F "file=@$WORK/fixture.yaml" -F 'name=Offline package fixture' -F 'kind=mihomo_profile' http://127.0.0.1:61767/api/v1/sources > "$WORK/source.json"
+SOURCE="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["id"])' "$WORK/source.json")"
+REV="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["revision"])' "$WORK/overview.json")"
+curl -fsS --max-time 90 -b "$WORK/cookies" -H 'Origin: http://127.0.0.1:16167' -H "If-Match: \"$REV\"" -X POST "http://127.0.0.1:61767/api/v1/sources/$SOURCE/apply" > "$WORK/applied.json"
+curl -fsS -b "$WORK/cookies" http://127.0.0.1:61767/api/v1/overview > "$WORK/after-apply.json"
+python3 - "$WORK/after-apply.json" <<'PY'
+import json, sys
+o = json.load(open(sys.argv[1]))
+assert o['status']['gateway'] == 'stopped', o['status']
+assert not o.get('status_error'), o.get('status_error')
+PY
+test ! -e /var/lib/opensurge/runtime/state.json
 # Upgrade preserves the generated core secret and private control store.
 sudo cp /var/lib/opensurge/config.yaml "$WORK/config"
 sudo sha256sum /var/lib/opensurge/control/control-token | cut -d' ' -f1 > "$WORK/token-digest"
