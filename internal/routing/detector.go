@@ -8,6 +8,7 @@ import (
 // ProbeResult separates transport reachability from geographical verification.
 // A country-service error must not turn a working outlet into a failed outlet.
 type ProbeResult struct {
+	transportError                error // Internal diagnostic only; never serialized or persisted.
 	InfrastructureError           bool
 	Reachable                     bool
 	Country, IP                   string

@@ -21,7 +21,7 @@ func probeServiceTLS(ctx context.Context, proxy string, hosts []string, roots *x
 	for _, host := range hosts {
 		err := handshakeViaProxy(ctx, proxy, host, roots)
 		if err != nil {
-			return ProbeResult{ServiceHost: host, CertificateError: certificateErrorCode(err)}
+			return ProbeResult{ServiceHost: host, CertificateError: certificateErrorCode(err), transportError: err}
 		}
 	}
 	return ProbeResult{Reachable: true}
