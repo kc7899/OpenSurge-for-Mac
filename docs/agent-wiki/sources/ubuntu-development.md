@@ -18,7 +18,7 @@ root Helper 与 opensurge 低权限控制服务分离。配置/节点文件 root
 
 流程只在完整门槛通过时上传产物；正式安装到用户 Mac 或 Ubuntu 以及迁移真实家庭网络不自动执行。主分支和 Mac 研发分支保持基线，本分支 PR 仅指向自己的 fork。
 
-发布：专用 Ubuntu CI 的 linux job 全部成功后，只有自己的 Ubuntu 分支、提交标题显式含 `[publish-ubuntu]` 时才创建预发布。其余提交只测试和上传 Actions 产物。发布 job 单独申请 contents:write；不改默认分支、不覆盖已有不同提交的 tag/安装包。后续预览须同步升级构建脚本 Debian 版本、测试包名、Web release tag 和发布 tag。安装包内保留许可证及准确源码提交。
+发布：专用 Ubuntu CI 的 linux job 全部成功后，只有自己的 Ubuntu 分支、提交标题显式含 `[publish-ubuntu]` 时才创建预发布。其余提交只测试和上传 Actions 产物。发布 job 单独申请 contents:write；不改默认分支、不覆盖已有不同提交的 tag/安装包。后续预览统一修改 packaging/linux/VERSION，构建、测试包名、Web release tag 和发布 tag 从该版本推导；同步维护安装文档中的示例命令。公开文件名使用连字符替代 Debian 版本中的 ~，避免 GitHub 对文件名改写造成校验清单不匹配。安装包内保留许可证及准确源码提交。
 
 参考：
 - https://wiki.metacubex.one/en/config/inbound/tun/

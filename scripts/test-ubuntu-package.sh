@@ -5,7 +5,8 @@ set -euo pipefail
 [[ "${GITHUB_ACTIONS:-}" == true && "$(uname -s)" == Linux ]] || { echo 'Disposable Ubuntu Actions runner required.' >&2; exit 1; }
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 [[ ! -e /var/lib/opensurge ]] || { echo 'Refusing to overwrite an existing installation' >&2; exit 1; }
-PKG="$ROOT/artifacts/ubuntu/opensurge-gateway_0.3.4~ubuntu.1_amd64.deb"
+VERSION="$(cat "$ROOT/packaging/linux/VERSION")"
+PKG="$ROOT/artifacts/ubuntu/opensurge-gateway_${VERSION//\~/-}_amd64.deb"
 dpkg-deb --info "$PKG"
 sudo apt-get install -y "$PKG"
 sudo systemctl is-active --quiet opensurge-helper opensurge-control

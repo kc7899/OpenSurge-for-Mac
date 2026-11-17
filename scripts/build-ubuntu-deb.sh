@@ -2,8 +2,11 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 [[ "$(uname -s)" == Linux && "$(uname -m)" == x86_64 ]] || { echo 'Build this package on Linux x86_64.' >&2; exit 1; }
-VERSION="${OPENSURGE_DEB_VERSION:-0.3.4~ubuntu.1}"
+VERSION="${OPENSURGE_DEB_VERSION:-$(cat "$ROOT/packaging/linux/VERSION")}"
 [[ "$VERSION" =~ ^[0-9][0-9A-Za-z.+~_-]*$ ]] || { echo 'Invalid Debian version' >&2; exit 1; }
+# GitHub sanitizes '~' in release asset names. Keep Debian's version syntax
+# inside the package, with a portable public filename and matching checksum.
+PACKAGE_FILE="opensurge-gateway_${VERSION//\~/-}_amd64.deb"
 CORE="${OPENSURGE_LINUX_CORE:-$ROOT/bin/mihomo-linux-amd64}"
 [[ -x "$CORE" ]] || { echo 'Build the pinned Linux Mihomo first.' >&2; exit 1; }
 file "$CORE" | grep -q 'ELF 64-bit.*x86-64' || { echo 'Wrong core format/architecture' >&2; exit 1; }
@@ -41,7 +44,7 @@ Description: OpenSurge Ubuntu IPv4 gateway and Web console (preview)
  Reuses the OpenSurge stable routing and subscription control plane.
  No gateway takeover on installation. Same-LAN IPv4 only.
 EOF
-dpkg-deb --root-owner-group --build "$STAGE" "$OUT/opensurge-gateway_${VERSION}_amd64.deb"
+dpkg-deb --root-owner-group --build "$STAGE" "$OUT/$PACKAGE_FILE"
 install -m 0644 docs/ubuntu-install.md "$OUT/INSTALL.md"
 {
  printf 'OpenSurge Ubuntu preview %s\nSource: ' "$VERSION"
@@ -50,5 +53,5 @@ install -m 0644 docs/ubuntu-install.md "$OUT/INSTALL.md"
  sha256sum "$CORE"
 } > "$OUT/BUILD-INFO.txt"
 cd "$OUT"
-sha256sum "opensurge-gateway_${VERSION}_amd64.deb" > SHA256SUMS
-echo "Package: $OUT/opensurge-gateway_${VERSION}_amd64.deb"
+sha256sum "$PACKAGE_FILE" > SHA256SUMS
+echo "Package: $OUT/$PACKAGE_FILE"

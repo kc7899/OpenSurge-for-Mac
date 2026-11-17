@@ -11,7 +11,7 @@ it does not start the network gateway or import any subscription.
    configure Netplan yourself). Keep the main router DHCP enabled. OpenSurge
    reads the address and physical default router; it never rewrites Netplan.
 2. Check the published SHA256, then install the downloaded package:
-   `sudo apt install ./opensurge-gateway_0.3.4~ubuntu.1_amd64.deb`
+   `sudo apt install ./opensurge-gateway_0.3.4-ubuntu.2_amd64.deb`
 3. On your computer, keep an SSH tunnel open:
    `ssh -N -L 16167:127.0.0.1:61767 USER@UBUNTU_IP`
 4. On Ubuntu run `sudo opensurge-admin console`, then open its one-time URL

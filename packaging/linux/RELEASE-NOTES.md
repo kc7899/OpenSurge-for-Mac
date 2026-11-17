@@ -1,6 +1,6 @@
 Ubuntu Server 24.04 x86_64 / amd64，后台服务 + Web 控制台，**IPv4 旁路由预览版**。
 
-下载 `.deb` 并核对 `SHA256SUMS`。安装：`sudo apt install ./opensurge-gateway_0.3.4~ubuntu.1_amd64.deb`。安装只启动控制服务，不接管网络。
+下载 `.deb` 并核对 `SHA256SUMS`。安装：`sudo apt install ./opensurge-gateway_0.3.4-ubuntu.2_amd64.deb`。安装只启动控制服务，不接管网络。
 
 在电脑建立 SSH 转发：`ssh -N -L 16167:127.0.0.1:61767 USER@UBUNTU_IP`。在 Ubuntu 执行 `sudo opensurge-admin console`，30 秒内打开显示的一次性链接。导入自己的订阅、校验应用，然后在网络页启动。客户端 IPv4 网关和 DNS 都设置为 Ubuntu 的固定 LAN IPv4；保留主路由 DHCP。
 
