@@ -38,6 +38,7 @@ type State struct {
 // automatic DNS, not a failed read. ServiceID identifies the original service;
 // restoring a removed service is skipped. VerifiedAt is startup evidence only.
 type SystemDNSSnapshot struct {
+	LinuxDomains   []string  `json:"linux_domains,omitempty"`
 	NetworkService string    `json:"network_service"`
 	ServiceID      string    `json:"service_id"`
 	Interface      string    `json:"interface"`

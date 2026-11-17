@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	goruntime "runtime"
 	"strconv"
 	"strings"
 
@@ -18,6 +19,9 @@ const localSystemProxyHost = "127.0.0.1"
 type SystemProxy struct{}
 
 func (SystemProxy) Prepare(ctx context.Context, interfaceName string, port int) (runtime.SystemProxySnapshot, error) {
+	if goruntime.GOOS == "linux" {
+		return runtime.SystemProxySnapshot{}, fmt.Errorf("headless Linux uses TUN; macOS system proxy integration is unavailable")
+	}
 	if strings.TrimSpace(interfaceName) == "" {
 		return runtime.SystemProxySnapshot{}, fmt.Errorf("upstream interface is required")
 	}
@@ -65,6 +69,9 @@ func (SystemProxy) Prepare(ctx context.Context, interfaceName string, port int) 
 }
 
 func (SystemProxy) Enable(ctx context.Context, snapshot runtime.SystemProxySnapshot, port int) error {
+	if goruntime.GOOS == "linux" {
+		return fmt.Errorf("macOS system proxy integration is unavailable on Linux")
+	}
 	if strings.TrimSpace(snapshot.NetworkService) == "" {
 		return fmt.Errorf("system proxy snapshot is missing its network service")
 	}
@@ -90,6 +97,9 @@ func (SystemProxy) Enable(ctx context.Context, snapshot runtime.SystemProxySnaps
 }
 
 func (SystemProxy) Restore(ctx context.Context, snapshot runtime.SystemProxySnapshot) error {
+	if goruntime.GOOS == "linux" {
+		return fmt.Errorf("cannot restore a macOS proxy snapshot on Linux")
+	}
 	if strings.TrimSpace(snapshot.NetworkService) == "" {
 		return fmt.Errorf("system proxy snapshot is missing its network service")
 	}

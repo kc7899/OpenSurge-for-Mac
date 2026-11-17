@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"sort"
 	"strings"
 	"text/template"
@@ -75,6 +76,9 @@ tun:
   stack: {{ .TUNStack }}
   device: {{ .TUNDevice }}
   auto-route: {{ .TUNAutoRoute }}
+{{- if .LinuxTUN }}
+  auto-redirect: {{ .TUNAutoRoute }}
+{{- end }}
   auto-detect-interface: {{ .TUNAutoDetectInterface }}
   strict-route: {{ .TUNStrictRoute }}
 {{- if .MacTUNIPv6Enabled }}
@@ -157,6 +161,7 @@ func RenderConfig(cfg config.Config) (string, error) {
 }
 
 type templateData struct {
+	LinuxTUN bool
 	config.MihomoConfig
 	TUNEnabled             bool
 	TUNDevice              string
@@ -253,6 +258,7 @@ func newTemplateData(cfg config.Config) (templateData, error) {
 	tunRouteAddresses := renderTUNRouteAddresses(cfg, lanPrefix)
 	return templateData{
 		MihomoConfig:           cfg.Mihomo,
+		LinuxTUN:               goruntime.GOOS == "linux",
 		TUNEnabled:             transparent.TUNEnabled(),
 		TUNDevice:              transparent.TUNDevice,
 		TUNStack:               transparent.TUNStack,

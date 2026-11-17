@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"os/exec"
+	goruntime "runtime"
 	"sort"
 	"strings"
 	"time"
@@ -54,6 +55,9 @@ type InterfaceOption struct {
 var runCommand = run
 
 func Discover(ctx context.Context, networkService, interfaceName string) (Snapshot, error) {
+	if goruntime.GOOS == "linux" {
+		return linuxDiscover(ctx, networkService, interfaceName)
+	}
 	if strings.TrimSpace(networkService) == "" {
 		var err error
 		networkService, err = NetworkServiceForInterface(ctx, interfaceName)
@@ -107,6 +111,9 @@ func DiscoverDefault(ctx context.Context) (Snapshot, error) {
 }
 
 func SetManual(ctx context.Context, cfg ManualConfig) error {
+	if goruntime.GOOS == "linux" {
+		return fmt.Errorf("configure the Ubuntu static address with Netplan before using the gateway; OpenSurge does not rewrite host interface configuration")
+	}
 	if err := ValidateManual(cfg); err != nil {
 		return err
 	}
@@ -170,6 +177,9 @@ func VerifyManual(snapshot Snapshot, expected ManualConfig) error {
 }
 
 func ServiceInterface(ctx context.Context, networkService string) (string, error) {
+	if goruntime.GOOS == "linux" {
+		return linuxInterface(networkService)
+	}
 	if strings.TrimSpace(networkService) == "" {
 		return "", fmt.Errorf("network service is required")
 	}
@@ -181,6 +191,9 @@ func ServiceInterface(ctx context.Context, networkService string) (string, error
 }
 
 func NetworkServiceForInterface(ctx context.Context, interfaceName string) (string, error) {
+	if goruntime.GOOS == "linux" {
+		return linuxInterface(interfaceName)
+	}
 	if strings.TrimSpace(interfaceName) == "" {
 		return "", fmt.Errorf("interface is required")
 	}
@@ -198,6 +211,9 @@ func NetworkServiceForInterface(ctx context.Context, interfaceName string) (stri
 }
 
 func ListInterfaces(ctx context.Context) ([]InterfaceOption, error) {
+	if goruntime.GOOS == "linux" {
+		return linuxInterfaces()
+	}
 	output, err := runCommand(ctx, "/usr/sbin/networksetup", "-listnetworkserviceorder")
 	if err != nil {
 		return nil, err
@@ -285,6 +301,9 @@ func parseServiceOrder(output string) map[string]string {
 }
 
 func SetDHCP(ctx context.Context, networkService string) error {
+	if goruntime.GOOS == "linux" {
+		return fmt.Errorf("restore the Ubuntu address through Netplan; OpenSurge does not rewrite host interface configuration")
+	}
 	if strings.TrimSpace(networkService) == "" {
 		return fmt.Errorf("network service is required")
 	}
@@ -296,6 +315,10 @@ func SetDHCP(ctx context.Context, networkService string) error {
 }
 
 func PingRouter(ctx context.Context, router string) error {
+	if goruntime.GOOS == "linux" {
+		_, err := runCommand(ctx, "ping", "-c", "1", "-W", "2", router)
+		return err
+	}
 	if net.ParseIP(router).To4() == nil {
 		return fmt.Errorf("router must be IPv4")
 	}

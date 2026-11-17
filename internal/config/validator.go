@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"strconv"
 	"strings"
 
@@ -432,8 +433,11 @@ func validateTransparent(cfg TransparentConfig) error {
 	case TransparentModeOff:
 		return nil
 	case TransparentModeTUN:
-		if !strings.HasPrefix(cfg.TUNDevice, "utun") {
+		if goruntime.GOOS != "linux" && !strings.HasPrefix(cfg.TUNDevice, "utun") {
 			return fmt.Errorf("transparent.tun_device must start with utun on macOS")
+		}
+		if goruntime.GOOS == "linux" && (len(cfg.TUNDevice) == 0 || len(cfg.TUNDevice) > 15 || strings.ContainsAny(cfg.TUNDevice, " /\t\n\x00")) {
+			return fmt.Errorf("Linux TUN device must be a valid interface name of at most 15 bytes")
 		}
 		switch cfg.TUNStack {
 		case "system", "gvisor", "mixed":

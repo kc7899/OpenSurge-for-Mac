@@ -6,6 +6,7 @@ import (
 	"net/netip"
 	"os/exec"
 	"regexp"
+	goruntime "runtime"
 	"slices"
 	"strings"
 	"time"
@@ -34,6 +35,9 @@ var runSCQuery = func(ctx context.Context, query string) (string, error) {
 var serviceIDPattern = regexp.MustCompile(`Setup:/Network/Service/([A-Fa-f0-9-]{36})(?:\s|$)`)
 
 func (SystemDNS) Prepare(ctx context.Context, iface string) (runtime.SystemDNSSnapshot, error) {
+	if goruntime.GOOS == "linux" {
+		return linuxPrepareDNS(ctx, iface)
+	}
 	service, err := NetworkServiceForInterface(ctx, iface)
 	if err != nil {
 		return runtime.SystemDNSSnapshot{}, err
@@ -92,6 +96,9 @@ func (SystemDNS) Prepare(ctx context.Context, iface string) (runtime.SystemDNSSn
 }
 
 func (SystemDNS) Enable(ctx context.Context, snapshot runtime.SystemDNSSnapshot) error {
+	if goruntime.GOOS == "linux" {
+		return linuxEnableDNS(ctx, snapshot)
+	}
 	service, err := verifyDNSService(ctx, snapshot)
 	if err != nil {
 		return err
@@ -104,6 +111,9 @@ func (SystemDNS) Enable(ctx context.Context, snapshot runtime.SystemDNSSnapshot)
 // is skipped; its backup is never applied to another UUID. The returned bool says
 // whether restart should try to reapply DNS, including after a failed restore.
 func (SystemDNS) Restore(ctx context.Context, snapshot runtime.SystemDNSSnapshot) (bool, error) {
+	if goruntime.GOOS == "linux" {
+		return linuxRestoreDNS(ctx, snapshot)
+	}
 	if !snapshot.Owned {
 		return false, nil
 	}
@@ -118,6 +128,9 @@ func (SystemDNS) Restore(ctx context.Context, snapshot runtime.SystemDNSSnapshot
 }
 
 func (SystemDNS) Verify(ctx context.Context, snapshot runtime.SystemDNSSnapshot) error {
+	if goruntime.GOOS == "linux" {
+		return linuxVerifyDNS(ctx, snapshot)
+	}
 	service, err := verifyDNSService(ctx, snapshot)
 	if err != nil {
 		return err

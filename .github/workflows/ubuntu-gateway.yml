@@ -1,0 +1,26 @@
+name: Ubuntu gateway
+on:
+  push:
+    branches: [development/ubuntu-gateway]
+  pull_request:
+    branches: [development/stable-gateway]
+permissions:
+  contents: read
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Install namespace test dependencies
+        run: sudo apt-get update && sudo apt-get install -y nftables iproute2 dnsmasq-base
+      - name: Unit tests
+        run: go test ./...
+      - name: Firewall ownership in a private network namespace
+        run: |
+          go test -c -o "$RUNNER_TEMP/opensurge-pf.test" ./internal/pf
+          sudo env OPENSURGE_LINUX_NETWORK_TEST=1 unshare --net "$RUNNER_TEMP/opensurge-pf.test" -test.run '^TestLinuxFirewallOwnedLifecycleNamespace$' -test.v
