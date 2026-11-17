@@ -40,12 +40,15 @@ proxies:
   - {name: 'US offline fixture', type: http, server: 192.0.2.1, port: 9}
 proxy-groups:
   - {name: Proxy, type: select, proxies: ['US offline fixture']}
-rules: [MATCH,REJECT]
+rules: ['MATCH,REJECT']
 EOF
 curl -fsS -b "$WORK/cookies" -H 'Origin: http://127.0.0.1:16167' -F "file=@$WORK/fixture.yaml" -F 'name=Offline package fixture' -F 'kind=mihomo_profile' http://127.0.0.1:61767/api/v1/sources > "$WORK/source.json"
 SOURCE="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["id"])' "$WORK/source.json")"
 REV="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["revision"])' "$WORK/overview.json")"
-curl -fsS --max-time 90 -b "$WORK/cookies" -H 'Origin: http://127.0.0.1:16167' -H "If-Match: \"$REV\"" -X POST "http://127.0.0.1:61767/api/v1/sources/$SOURCE/apply" > "$WORK/applied.json"
+if ! curl --fail-with-body -sS --max-time 90 -b "$WORK/cookies" -H 'Origin: http://127.0.0.1:16167' -H "If-Match: \"$REV\"" -X POST "http://127.0.0.1:61767/api/v1/sources/$SOURCE/apply" > "$WORK/applied.json"; then
+ python3 -c 'import json,sys; print("Synthetic source apply failed:", json.load(open(sys.argv[1])).get("error",{}).get("code","unknown"))' "$WORK/applied.json"
+ exit 1
+fi
 curl -fsS -b "$WORK/cookies" http://127.0.0.1:61767/api/v1/overview > "$WORK/after-apply.json"
 python3 - "$WORK/after-apply.json" <<'PY'
 import json, sys
