@@ -1,6 +1,12 @@
 Ubuntu Server 24.04 x86_64 / amd64，后台服务 + Web 控制台，**IPv4 旁路由预览版**。
 
-下载 `.deb` 并核对 `SHA256SUMS`。安装：`sudo apt install ./opensurge-gateway_0.3.4-ubuntu.2_amd64.deb`。安装只启动控制服务，不接管网络。
+下载 `.deb` 并核对 `SHA256SUMS`。安装：`sudo apt install ./opensurge-gateway_0.3.4-ubuntu.3_amd64.deb`。安装只启动控制服务，不接管网络。
+
+本次修复来自 Ubuntu 实机反馈：
+- 没有有效订阅时返回空数组，修复“代理与规则源”页面崩溃。
+- 局域网密码登录后可读取/保存稳定路由设置、立即检查；保持同源、会话与版本校验。
+- 为 dnsmasq 的配置、PID、日志三个精确路径安装 AppArmor 授权，仅重载 dnsmasq 策略；卸载清理本包 include，保留管理员其他规则，不关闭 AppArmor。
+- 随包提供固定版本与 SHA256 的公共地理数据库，在导入使用的 data 和生成配置使用的 runtime 目录补齐缺失缓存，保留已有缓存。普通 GEOIP/GEOSITE/IP-ASN 规则校验不再依赖首次联网下载。自定义远程 rule-provider 等其他资源仍需自行准备或联网。
 
 在电脑建立 SSH 转发：`ssh -N -L 16167:127.0.0.1:61767 USER@UBUNTU_IP`。在 Ubuntu 执行 `sudo opensurge-admin console`，30 秒内打开显示的一次性链接。导入自己的订阅、校验应用，然后在网络页启动。客户端 IPv4 网关和 DNS 都设置为 Ubuntu 的固定 LAN IPv4；保留主路由 DHCP。
 

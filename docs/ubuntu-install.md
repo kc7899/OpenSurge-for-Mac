@@ -11,7 +11,7 @@ it does not start the network gateway or import any subscription.
    configure Netplan yourself). Keep the main router DHCP enabled. OpenSurge
    reads the address and physical default router; it never rewrites Netplan.
 2. Check the published SHA256, then install the downloaded package:
-   `sudo apt install ./opensurge-gateway_0.3.4-ubuntu.2_amd64.deb`
+   `sudo apt install ./opensurge-gateway_0.3.4-ubuntu.3_amd64.deb`
 3. On your computer, keep an SSH tunnel open:
    `ssh -N -L 16167:127.0.0.1:61767 USER@UBUNTU_IP`
 4. On Ubuntu run `sudo opensurge-admin console`, then open its one-time URL
@@ -28,6 +28,24 @@ it does not start the network gateway or import any subscription.
 The Web control API and explicit HTTP proxy bind to loopback by default.
 The existing password-protected LAN console can be enabled separately. Never
 publish the raw control API or Mihomo controller to the Internet.
+
+Since ubuntu.3, installation adds one owned optional include to
+`/etc/apparmor.d/local/usr.sbin.dnsmasq`. Its packaged rules permit only reads
+of `/var/lib/opensurge/runtime/dnsmasq.conf` and writes of `dnsmasq.pid` and
+`logs/dnsmasq.log`. Only the stock dnsmasq AppArmor profile is reloaded when
+AppArmor is active and that profile is enabled. Removal deletes our include
+and reloads the same profile, retaining administrator rules. AppArmor is never
+disabled. A customized profile that omits the stock local include needs
+administrator review; the package does not rewrite distribution policy.
+
+The package also seeds missing `GeoIP.dat`, `GeoSite.dat`, `geoip.metadb` and
+`ASN.mmdb` files in both `data/` (imported profiles' Mihomo home) and `runtime/`
+(generated profiles' home), with root:opensurge 0640 ownership. Existing caches
+are preserved on upgrade. The fixed public snapshot and checksums are recorded
+in BUILD-INFO.txt and `/usr/share/opensurge/geodata/SHA256SUMS`; attribution and
+licenses are in the package notices. This removes the initial geodata download
+dependency for ordinary GEOIP/GEOSITE/IP-ASN validation. It does not supply
+arbitrary remote rule-providers, missing custom categories or subscription data.
 
 ## Scope and limits
 

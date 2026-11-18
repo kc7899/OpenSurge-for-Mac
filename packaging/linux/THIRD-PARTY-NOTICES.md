@@ -27,3 +27,25 @@ desktop host described in that upstream notice. Linux dnsmasq is supplied by
 Ubuntu's `dnsmasq-base` dependency; its exact version and corresponding source
 and copyright are provided by Ubuntu's package metadata and
 `/usr/share/doc/dnsmasq-base/`.
+
+## Offline geodata snapshot
+
+The package includes unchanged public data from MetaCubeX/meta-rules-dat,
+snapshot `61beccc959c75a100d3997b63d6491e5f8ce5eb1` (2026-11-18):
+https://github.com/MetaCubeX/meta-rules-dat/tree/61beccc959c75a100d3997b63d6491e5f8ce5eb1
+Source/build recipe and data attributions:
+https://github.com/MetaCubeX/meta-rules-dat (GPL-3.0),
+https://github.com/Loyalsoldier/geoip (CC-BY-SA-4.0 and GPL-3.0),
+https://github.com/xishang0128/geoip (CC-BY-SA-4.0),
+https://github.com/v2fly/domain-list-community (MIT),
+https://github.com/Loyalsoldier/domain-list-custom,
+https://github.com/blackmatrix7/ios_rule_script (MIT).
+The MetaCubeX README lists the additional domain-list contributors and sources.
+GPL-3.0 text is included in this package's copyright file; CC-BY-SA-4.0 terms:
+https://creativecommons.org/licenses/by-sa/4.0/ .
+
+This product includes GeoLite2 data created by MaxMind, available from
+https://www.maxmind.com . No data content has been changed; only filenames are
+mapped to the pinned Mihomo cache names (`GeoIP.dat`, `GeoSite.dat`,
+`geoip.metadb`, `ASN.mmdb`). Exact checksums are installed at
+`/usr/share/opensurge/geodata/SHA256SUMS` and listed in BUILD-INFO.txt.

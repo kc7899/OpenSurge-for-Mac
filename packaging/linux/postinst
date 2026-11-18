@@ -7,6 +7,16 @@ case "$1" in
   install -d -o root -g opensurge -m 2750 /var/lib/opensurge /var/lib/opensurge/bin /var/lib/opensurge/data /var/lib/opensurge/runtime /var/lib/opensurge/runtime/logs
   install -d -o opensurge -g opensurge -m 0700 /var/lib/opensurge/control
   install -o root -g opensurge -m 0750 /usr/lib/opensurge/mihomo /var/lib/opensurge/bin/mihomo
+  # Imported profiles use data/ as Mihomo -d; generated profiles use runtime/.
+  # Preserve existing (possibly newer) caches. Install only missing files.
+  for geo_dir in /var/lib/opensurge/data /var/lib/opensurge/runtime; do
+   for geo_file in GeoIP.dat GeoSite.dat geoip.metadb ASN.mmdb; do
+    if [ ! -e "$geo_dir/$geo_file" ]; then
+     install -o root -g opensurge -m 0640 "/usr/share/opensurge/geodata/$geo_file" "$geo_dir/$geo_file"
+    fi
+   done
+  done
+  opensurge_apparmor install
   /usr/sbin/opensurge-admin init
   chown root:opensurge /var/lib/opensurge/config.yaml
   chmod 0640 /var/lib/opensurge/config.yaml

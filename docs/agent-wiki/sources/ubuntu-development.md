@@ -26,4 +26,27 @@ root Helper 与 opensurge 低权限控制服务分离。配置/节点文件 root
 - https://manpages.ubuntu.com/manpages/noble/man1/resolvectl.1.html
 - https://docs.kernel.org/networking/ip-sysctl.html
 
+## Ubuntu 实机反馈修复（ubuntu.3）
+
+基于 e25bf997 的用户补丁已先执行 `git apply --check` 再应用：
+OrderedSources 空集保留非 nil 的 []，稳定路由 GET/PUT/check 移至本机与 LAN 共用的
+认证路由。空来源 API、LAN 登录/未登录/同源/版本冲突/跨入口共享设置均有回归测试。
+
+打包额外处理 dnsmasq AppArmor 与地理缓存：通过 stock local include 引用本包三个
+精确文件规则，configure/remove 只重载 dnsmasq profile，保留管理员本地规则和禁用状态，
+不重写发行版 profile。自定义 profile 若不包含 stock local include 需管理员核对。
+固定 MetaCubeX 公共快照（revision 和逐文件 SHA 在 fetch 脚本/manifest）随包提供，
+postinst 在 data 和 runtime 补齐缺失项，已有缓存不覆盖，私人配置不进入打包。
+GEOIP DAT、MetaDB、GEOSITE、ASN 的实际 import/apply 在仅 loopback 的 namespace
+验证；测试拒绝在存在物理网络接口的 namespace 运行。自定义远程 provider 不属于此离线保证。
+
+新门槛在 disposable Ubuntu VM 安装官方 apparmor-profiles 后将 dnsmasq 置于 enforce，
+复现无授权时的 Permission denied，再通过真实包重装确认配置可读、PID/日志可写、DNS
+应答和私有 config.yaml 仍拒绝，卸载后重新拒绝并保留管理员 sentinel 与发行版 profile。
+本机 macOS 只能验证共享 Go 回归与 Linux 交叉编译；AppArmor/离线导入结论必须以
+该版本 Ubuntu Actions 成功记录为证，不能沿用 ubuntu.2 的通过记录。
+
+AppArmor 行为参考官方说明：https://ubuntu.com/server/docs/how-to/security/apparmor/
+（local override 与 `apparmor_parser -r`）；发行版 profile 来源为 Ubuntu apparmor-profiles。
+
 注意：systemd-resolved 测试不能在只隔离 network namespace 的环境通过宿主 D-Bus 修改宿主 DNS；真实网络测试必须另隔离挂载 /run，或禁用宿主 DNS 协同并明确验证边界。

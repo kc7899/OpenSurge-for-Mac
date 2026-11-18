@@ -5,12 +5,47 @@ set -euo pipefail
 [[ "${GITHUB_ACTIONS:-}" == true && "$(uname -s)" == Linux ]] || { echo 'Disposable Ubuntu Actions runner required.' >&2; exit 1; }
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 [[ ! -e /var/lib/opensurge ]] || { echo 'Refusing to overwrite an existing installation' >&2; exit 1; }
+WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
+# Enable Ubuntu's stock dnsmasq profile for this disposable VM only, after
+# other namespace tests have finished using temporary, non-production paths.
+sudo apt-get install -y apparmor-profiles apparmor-utils
+sudo test -f /etc/apparmor.d/usr.sbin.dnsmasq
+sudo aa-enforce /etc/apparmor.d/usr.sbin.dnsmasq
+sudo grep -Eq '(^|/)dnsmasq \(enforce\)$' /sys/kernel/security/apparmor/profiles
+sudo cat /etc/apparmor.d/usr.sbin.dnsmasq > "$WORK/distribution-profile"
+printf '# Administrator local rules sentinel\n' | sudo tee -a /etc/apparmor.d/local/usr.sbin.dnsmasq >/dev/null
 VERSION="$(cat "$ROOT/packaging/linux/VERSION")"
 PKG="$ROOT/artifacts/ubuntu/opensurge-gateway_${VERSION//\~/-}_amd64.deb"
 dpkg-deb --info "$PKG"
 sudo apt-get install -y "$PKG"
 sudo systemctl is-active --quiet opensurge-helper opensurge-control
 sudo systemd-analyze verify /usr/lib/systemd/system/opensurge-{helper,control}.service
+sudo cmp "$WORK/distribution-profile" /etc/apparmor.d/usr.sbin.dnsmasq
+for geo_dir in /var/lib/opensurge/data /var/lib/opensurge/runtime; do
+ sudo sh -ec 'cd "$1"; sha256sum -c /usr/share/opensurge/geodata/SHA256SUMS' _ "$geo_dir"
+done
+# The actual root import runner must validate both DAT and MetaDB profiles in
+# a namespace with no external interfaces, DNS or Internet route.
+go test -c -o "$WORK/offline-import.test" "$ROOT/internal/controlapi"
+sudo env OPENSURGE_OFFLINE_IMPORT_TEST=1 OPENSURGE_TEST_CORE=/var/lib/opensurge/bin/mihomo OPENSURGE_TEST_GEODATA=/var/lib/opensurge/data unshare --net "$WORK/offline-import.test" -test.run '^TestUbuntuOfflineImportedGeodata$' -test.v
+# Reproduce the reported denial with the exact installed runtime path. Remove
+# only our include, verify denial, then let real postinst restore it on reinstall.
+sudo tee /var/lib/opensurge/runtime/dnsmasq.conf >/dev/null <<'EOF'
+port=15353
+interface=lo
+bind-interfaces
+no-resolv
+no-hosts
+address=/opensurge-fixture.test/192.0.2.15
+pid-file=/var/lib/opensurge/runtime/dnsmasq.pid
+EOF
+sudo sh -eu -c '. "$1"; opensurge_apparmor remove' _ "$ROOT/packaging/linux/apparmor-functions"
+if sudo /usr/sbin/dnsmasq --test --conf-file=/var/lib/opensurge/runtime/dnsmasq.conf > "$WORK/denied" 2>&1; then
+ echo 'AppArmor baseline unexpectedly allowed the runtime configuration' >&2; exit 1
+fi
+grep -q 'Permission denied' "$WORK/denied"
+sudo apt-get install --reinstall -y "$PKG"
+sudo python3 "$ROOT/scripts/test-ubuntu-apparmor.py"
 test -s /usr/share/doc/opensurge-gateway/UBUNTU-NOTICES.md
 test -s /usr/share/doc/opensurge-gateway/licenses/react-MIT.txt
 test -s /usr/share/doc/opensurge-gateway/source-commit
@@ -31,7 +66,6 @@ if ip link show opensurge0 >/dev/null 2>&1; then echo 'Installer started TUN une
 test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:61767/api/v1/overview)" == 401
 [[ "$(sudo stat -c %U:%G:%a /var/lib/opensurge/config.yaml)" == root:opensurge:640 ]]
 [[ "$(sudo stat -c %U:%G:%a /var/lib/opensurge/control/control-token)" == opensurge:opensurge:600 ]]
-WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 # Keep administrator login links/cookies private and out of CI logs.
 sudo opensurge-admin console > "$WORK/console"
 URL="$(sed -n 's@^http://127.0.0.1:16167/@http://127.0.0.1:61767/@p' "$WORK/console")"
@@ -55,7 +89,7 @@ proxies:
   - {name: 'US offline fixture', type: http, server: 192.0.2.1, port: 9}
 proxy-groups:
   - {name: Proxy, type: select, proxies: ['US offline fixture']}
-rules: ['MATCH,REJECT']
+rules: ['GEOSITE,cn,DIRECT', 'GEOIP,CN,DIRECT,no-resolve', 'IP-ASN,13335,Proxy,no-resolve', 'MATCH,REJECT']
 EOF
 curl -fsS -b "$WORK/cookies" -H 'Origin: http://127.0.0.1:16167' -F "file=@$WORK/fixture.yaml" -F 'name=Offline package fixture' -F 'kind=mihomo_profile' http://127.0.0.1:61767/api/v1/sources > "$WORK/source.json"
 SOURCE="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["id"])' "$WORK/source.json")"
@@ -75,11 +109,21 @@ sudo test ! -e /var/lib/opensurge/runtime/state.json
 # Upgrade preserves the generated core secret and private control store.
 sudo cp /var/lib/opensurge/config.yaml "$WORK/config"
 sudo sha256sum /var/lib/opensurge/control/control-token | cut -d' ' -f1 > "$WORK/token-digest"
+sudo stat -c '%i:%Y:%s' /var/lib/opensurge/data/GeoIP.dat > "$WORK/cache-stat"
 sudo apt-get install --reinstall -y "$PKG"
 sudo cmp "$WORK/config" /var/lib/opensurge/config.yaml
 sudo sha256sum /var/lib/opensurge/control/control-token | cut -d' ' -f1 | cmp - "$WORK/token-digest"
+sudo stat -c '%i:%Y:%s' /var/lib/opensurge/data/GeoIP.dat | cmp - "$WORK/cache-stat"
+test "$(grep -Fc '#include if exists "/usr/share/opensurge/apparmor-dnsmasq"' /etc/apparmor.d/local/usr.sbin.dnsmasq)" == 1
 sudo test ! -e /var/lib/opensurge/runtime/state.json
 sudo apt-get remove -y opensurge-gateway
+! grep -Fq '/usr/share/opensurge/apparmor-dnsmasq' /etc/apparmor.d/local/usr.sbin.dnsmasq
+grep -Fq '# Administrator local rules sentinel' /etc/apparmor.d/local/usr.sbin.dnsmasq
+sudo cmp "$WORK/distribution-profile" /etc/apparmor.d/usr.sbin.dnsmasq
+if sudo /usr/sbin/dnsmasq --test --conf-file=/var/lib/opensurge/runtime/dnsmasq.conf > "$WORK/removed-denied" 2>&1; then
+ echo 'Removed package left AppArmor runtime access active' >&2; exit 1
+fi
+grep -q 'Permission denied' "$WORK/removed-denied"
 sudo cmp "$WORK/config" /var/lib/opensurge/config.yaml
 if systemctl is-active --quiet opensurge-control; then echo 'Control service still active after removal' >&2; exit 1; fi
 echo 'Debian install, loopback authentication, clean stopped state, config/token preservation and removal passed.'
