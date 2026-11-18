@@ -8,9 +8,21 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 # Enable Ubuntu's stock dnsmasq profile for this disposable VM only, after
 # other namespace tests have finished using temporary, non-production paths.
-sudo apt-get install -y apparmor-profiles apparmor-utils
+sudo apt-get install -y apparmor-profiles
 sudo test -f /etc/apparmor.d/usr.sbin.dnsmasq
-sudo aa-enforce /etc/apparmor.d/usr.sbin.dnsmasq
+# aa-enforce's Python loader scans unrelated runner profiles and cannot parse
+# some kernel mount rules. Edit only this disposable stock profile's mode and
+# use the real parser directly (as the package does), keeping enforcement.
+sudo python3 - <<'PY'
+from pathlib import Path
+import re
+p = Path('/etc/apparmor.d/usr.sbin.dnsmasq')
+def enforce(m):
+    flags = [f.strip() for f in m[1].split(',') if f.strip() != 'complain']
+    return 'flags=(' + ','.join(flags) + ')' if flags else ''
+p.write_text(re.sub(r'flags=\(([^)]*)\)', enforce, p.read_text()))
+PY
+sudo apparmor_parser -r -W -T /etc/apparmor.d/usr.sbin.dnsmasq
 sudo grep -Eq '(^|/)dnsmasq \(enforce\)$' /sys/kernel/security/apparmor/profiles
 sudo cat /etc/apparmor.d/usr.sbin.dnsmasq > "$WORK/distribution-profile"
 printf '# Administrator local rules sentinel\n' | sudo tee -a /etc/apparmor.d/local/usr.sbin.dnsmasq >/dev/null

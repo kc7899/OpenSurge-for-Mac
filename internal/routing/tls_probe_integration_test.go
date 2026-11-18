@@ -1,6 +1,7 @@
 package routing
 
 import (
+	"bufio"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -86,14 +87,23 @@ func testConnectProxy(t *testing.T, origin *httptest.Server) *httptest.Server {
 			return
 		}
 		defer remote.Close()
-		client, _, e := w.(http.Hijacker).Hijack()
+		client, buffered, e := w.(http.Hijacker).Hijack()
 		if e != nil {
 			return
 		}
 		defer client.Close()
 		_, _ = io.WriteString(client, "HTTP/1.1 200 Connection Established\r\n\r\n")
-		go func() { _, _ = io.Copy(remote, client); _ = remote.Close() }()
+		// Preserve any bytes buffered by net/http during CONNECT parsing and
+		// half-close the tunnel rather than discarding the opposite direction.
+		done := make(chan struct{})
+		go func() {
+			_, _ = io.Copy(remote, buffered)
+			_ = remote.(*net.TCPConn).CloseWrite()
+			close(done)
+		}()
 		_, _ = io.Copy(client, remote)
+		_ = client.(*net.TCPConn).CloseWrite()
+		<-done
 	}))
 	t.Cleanup(p.Close)
 	return p
@@ -118,6 +128,39 @@ func TestTLSProbeStrictValidationWithoutHTTP(t *testing.T) {
 				t.Fatal("TLS-only check sent an HTTP request")
 			}
 		})
+	}
+}
+
+func TestConnectFixturePreservesBufferedTunnelBytes(t *testing.T) {
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, "tunnel-fixture")
+	}))
+	defer origin.Close()
+	proxy := testConnectProxy(t, origin)
+	conn, err := net.DialTimeout("tcp", proxy.Listener.Addr().String(), time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(time.Second))
+	// One write deliberately puts tunnel payload in net/http's CONNECT buffer.
+	_, err = io.WriteString(conn, "CONNECT fixture:80 HTTP/1.1\r\nHost: fixture:80\r\n\r\nGET / HTTP/1.1\r\nHost: fixture\r\nConnection: close\r\n\r\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader := bufio.NewReader(conn)
+	connect, err := http.ReadResponse(reader, &http.Request{Method: http.MethodConnect})
+	if err != nil || connect.StatusCode != 200 {
+		t.Fatalf("CONNECT failed: %v", err)
+	}
+	response, err := http.ReadResponse(reader, &http.Request{Method: http.MethodGet})
+	if err != nil {
+		t.Fatalf("buffered tunnel payload was lost: %v", err)
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil || string(body) != "tunnel-fixture" {
+		t.Fatalf("tunnel response: %q %v", body, err)
 	}
 }
 
