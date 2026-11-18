@@ -45,7 +45,7 @@ if sudo /usr/sbin/dnsmasq --test --conf-file=/var/lib/opensurge/runtime/dnsmasq.
 fi
 grep -q 'Permission denied' "$WORK/denied"
 sudo apt-get install --reinstall -y "$PKG"
-sudo python3 "$ROOT/scripts/test-ubuntu-apparmor.py"
+sudo env GITHUB_ACTIONS="$GITHUB_ACTIONS" python3 "$ROOT/scripts/test-ubuntu-apparmor.py"
 test -s /usr/share/doc/opensurge-gateway/UBUNTU-NOTICES.md
 test -s /usr/share/doc/opensurge-gateway/licenses/react-MIT.txt
 test -s /usr/share/doc/opensurge-gateway/source-commit
