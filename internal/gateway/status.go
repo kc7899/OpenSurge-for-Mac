@@ -149,7 +149,7 @@ func (m Manager) Status(ctx context.Context) (Status, error) {
 		}
 	}
 	forwarding := "unknown"
-	if current, err := sysctl.New().Current(); err == nil {
+	if current, err := sysctl.NewForInterface(m.cfg.Gateway.Interface).Current(); err == nil {
 		forwarding = sysctl.FormatForwarding(current)
 	}
 	ipv4Takeover := deriveIPv4Takeover(gatewayStatus, runtimeState, pfStatus, forwarding)

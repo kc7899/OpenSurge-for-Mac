@@ -1,0 +1,30 @@
+# Embedded in Debian maintainer scripts, including postrm after files disappear.
+# Keep the administrator's local rules and the distribution profile intact.
+opensurge_apparmor() {
+ aa_local=/etc/apparmor.d/local/usr.sbin.dnsmasq
+ aa_profile=/etc/apparmor.d/usr.sbin.dnsmasq
+ aa_include='#include if exists "/usr/share/opensurge/apparmor-dnsmasq"'
+ case "$1" in
+  install)
+   install -d -m 0755 /etc/apparmor.d/local
+   if [ ! -e "$aa_local" ]; then install -m 0644 /dev/null "$aa_local"; fi
+   if ! grep -Fxq "$aa_include" "$aa_local"; then printf '\n%s\n' "$aa_include" >> "$aa_local"; fi
+   ;;
+  remove)
+   if [ -f "$aa_local" ] && grep -Fxq "$aa_include" "$aa_local"; then
+    aa_tmp=$(mktemp /etc/apparmor.d/local/.opensurge-dnsmasq.XXXXXX)
+    cp -p "$aa_local" "$aa_tmp"
+    awk -v owned="$aa_include" '$0 != owned' "$aa_local" > "$aa_tmp"
+    mv -f "$aa_tmp" "$aa_local"
+   fi
+   ;;
+ esac
+ # Do not enable AppArmor or a deliberately disabled dnsmasq profile. Reload
+ # this one profile only; failure is visible and aborts package configuration.
+ if [ -f "$aa_profile" ] && [ ! -e /etc/apparmor.d/disable/usr.sbin.dnsmasq ] &&
+    [ -r /sys/module/apparmor/parameters/enabled ] &&
+    grep -q '^Y' /sys/module/apparmor/parameters/enabled &&
+    [ -d /sys/kernel/security/apparmor ]; then
+  apparmor_parser -r -W -T "$aa_profile"
+ fi
+}

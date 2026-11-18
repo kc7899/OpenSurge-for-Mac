@@ -32,7 +32,7 @@ def describe(args):
     sources = [root / 'scripts/build-opensurge-mihomo.sh',
                root / 'scripts/mihomo-build-cache.py',
                *sorted((root / 'patches/mihomo').rglob('*'))]
-    environment = dict(os.environ, GOOS='darwin', GOARCH=args.arch, CGO_ENABLED='0')
+    environment = dict(os.environ, GOOS=args.os, GOARCH=args.arch, CGO_ENABLED='0')
     go_env = json.loads(subprocess.check_output([
         args.go, 'env', '-json', 'GOVERSION', 'GOOS', 'GOARCH', 'CGO_ENABLED',
         'GOAMD64', 'GOARM64', 'GOEXPERIMENT', 'GOFLAGS', 'GOTOOLCHAIN', 'GOFIPS140',
@@ -114,6 +114,7 @@ def main():
     description = commands.add_parser('describe')
     for name in ('root', 'source', 'go', 'arch', 'version'):
         description.add_argument('--' + name, required=True)
+    description.add_argument('--os', default='darwin', choices=['darwin', 'linux'])
     for command in ('restore', 'publish'):
         sub = commands.add_parser(command)
         for name in ('manifest', 'cache', 'output'):

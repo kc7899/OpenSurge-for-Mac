@@ -119,7 +119,7 @@ type Source struct {
 }
 
 func OrderedSources(sources []Source, order []string) []Source {
-	out := append([]Source(nil), sources...)
+	out := append([]Source{}, sources...)
 	rank := map[string]int{}
 	for i, id := range order {
 		rank[id] = i + 1

@@ -1,0 +1,151 @@
+name: Ubuntu gateway
+on:
+  pull_request:
+    branches: [development/stable-gateway]
+permissions:
+  contents: read
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Shared release version
+        run: |
+          version="$(cat packaging/linux/VERSION)"
+          [[ "$version" =~ ^[0-9][0-9A-Za-z.+~_-]*$ ]]
+          echo "OPENSURGE_RELEASE_TAG=v${version//\~/-}" >> "$GITHUB_ENV"
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Install namespace test dependencies
+        run: sudo apt-get update && sudo apt-get install -y nftables iproute2 dnsmasq-base dnsutils dbus systemd-resolved
+      - name: Unit tests
+        run: go test ./...
+      - name: Firewall ownership in a private network namespace
+        run: |
+          go test -c -o "$RUNNER_TEMP/opensurge-pf.test" ./internal/pf
+          sudo env OPENSURGE_LINUX_NETWORK_TEST=1 unshare --net "$RUNNER_TEMP/opensurge-pf.test" -test.run '^TestLinuxFirewallOwnedLifecycleNamespace$' -test.v
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - run: npm install --global pnpm@11.19.0
+      - run: pnpm --dir web install --frozen-lockfile
+      - name: Shared Web tests and Ubuntu UI build
+        id: web-build
+        run: make web-test web-build
+      - uses: actions/cache@v4
+        id: mihomo-cache
+        with:
+          path: runtime/release-tools/cache
+          key: ubuntu-mihomo-${{ runner.arch }}-${{ hashFiles('patches/mihomo/**', 'scripts/build-opensurge-mihomo.sh', 'scripts/mihomo-build-cache.py') }}
+      - name: Build pinned Linux Mihomo
+        id: core-build
+        env:
+          OPENSURGE_MIHOMO_OS: linux
+          OPENSURGE_MIHOMO_ARCH: amd64
+          OPENSURGE_MIHOMO_OUTPUT: ${{ github.workspace }}/bin/mihomo-linux-amd64
+          GODEBUG: http2client=0
+        run: |
+          for attempt in 1 2 3; do
+            if ./scripts/build-opensurge-mihomo.sh; then exit 0; fi
+            echo "Pinned core build attempt $attempt failed; retrying without changing inputs."
+          done
+          exit 1
+      - uses: actions/cache/save@v4
+        if: steps.mihomo-cache.outputs.cache-hit != 'true'
+        with:
+          path: runtime/release-tools/cache
+          key: ubuntu-mihomo-${{ runner.arch }}-${{ hashFiles('patches/mihomo/**', 'scripts/build-opensurge-mihomo.sh', 'scripts/mihomo-build-cache.py') }}
+      - name: Real systemd-resolved on a private D-Bus and network namespace
+        if: ${{ !cancelled() && steps.core-build.outcome == 'success' }}
+        run: |
+          go test -c -o "$RUNNER_TEMP/opensurge-network.test" ./internal/macosnetwork
+          sudo env OPENSURGE_LINUX_NETWORK_TEST=1 unshare --mount --net bash -euc '
+            mount --make-rprivate /
+            mount -t tmpfs tmpfs /run
+            exec "$1" -test.run "^TestLinuxResolvedPrivateBusNamespace$" -test.v
+          ' _ "$RUNNER_TEMP/opensurge-network.test"
+      - name: Existing real-core stable provider and policy integration
+        if: ${{ !cancelled() && steps.core-build.outcome == 'success' }}
+        env:
+          OPENSURGE_TEST_CORE: ${{ github.workspace }}/bin/mihomo-linux-amd64
+        run: |
+          test_status=0
+          go test ./internal/controlapi ./internal/mihomo ./internal/routing -count=1 || test_status=1
+          go test -c -o "$RUNNER_TEMP/opensurge-routing.test" ./internal/routing
+          sudo env OPENSURGE_TEST_CORE="$OPENSURGE_TEST_CORE" OPENSURGE_TEST_BIND_UPLINK=1 "$RUNNER_TEMP/opensurge-routing.test" -test.run '^TestCertificateFailoverThroughRealIsolatedCore$' -test.v || test_status=1
+          go test -c -o "$RUNNER_TEMP/opensurge-control.test" ./internal/controlapi
+          sudo env OPENSURGE_TEST_CORE="$OPENSURGE_TEST_CORE" "$RUNNER_TEMP/opensurge-control.test" -test.run '^TestRootStableProbeUsesSavedNodeAndRejectsDrift$' -test.v || test_status=1
+          exit "$test_status"
+      - name: Offline IPv4 gateway data plane in private mount and network namespaces
+        if: ${{ !cancelled() && steps.core-build.outcome == 'success' }}
+        run: |
+          go test -c -o "$RUNNER_TEMP/opensurge-gateway.test" ./internal/gateway
+          sudo env OPENSURGE_LINUX_NETWORK_TEST=1 OPENSURGE_TEST_CORE="$PWD/bin/mihomo-linux-amd64" OPENSURGE_LINUX_FIXTURE="$PWD/scripts/ubuntu-network-fixture.py" unshare --mount --net bash -euc '
+            mount --make-rprivate /
+            mount -t tmpfs tmpfs /run
+            mkdir -p /run/netns
+            test -c /dev/net/tun || { mkdir -p /dev/net; mknod /dev/net/tun c 10 200; }
+            exec "$1" -test.run "^TestUbuntuGatewayDataPlaneNamespace$" -test.v
+          ' _ "$RUNNER_TEMP/opensurge-gateway.test"
+      - name: Build Debian installer
+        id: deb-build
+        if: ${{ !cancelled() && steps.core-build.outcome == 'success' && steps.web-build.outcome == 'success' }}
+        run: ./scripts/build-ubuntu-deb.sh
+      - name: Install, Web authentication, upgrade and remove
+        if: ${{ !cancelled() && steps.deb-build.outcome == 'success' }}
+        run: ./scripts/test-ubuntu-package.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: opensurge-ubuntu-24.04-amd64-preview
+          path: artifacts/ubuntu/*
+  publish:
+    needs: linux
+    if: github.repository == 'kc7899/OpenSurge-for-Mac' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'development/ubuntu-gateway'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    concurrency:
+      group: opensurge-ubuntu-preview-release
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Explicit release intent
+        id: intent
+        run: |
+          if git log -1 --format=%s | grep -Fq '[publish-ubuntu]'; then
+            echo 'publish=true' >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/download-artifact@v4
+        if: steps.intent.outputs.publish == 'true'
+        with:
+          name: opensurge-ubuntu-24.04-amd64-preview
+          path: dist
+      - name: Publish tested Ubuntu prerelease
+        if: steps.intent.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SOURCE_COMMIT: ${{ github.event.pull_request.head.sha }}
+        run: |
+          cd dist
+          sha256sum --check SHA256SUMS
+          cd ..
+          version="$(cat packaging/linux/VERSION)"
+          tag="v${version//\~/-}"
+          if gh release view "$tag" --json targetCommitish,isPrerelease > existing.json; then
+            python3 -c 'import json,os; r=json.load(open("existing.json")); assert r["targetCommitish"]==os.environ["SOURCE_COMMIT"] and r["isPrerelease"], "Release exists for another commit; increment the preview version. Existing assets were not changed."'
+            exit 0
+          fi
+          gh release create "$tag" dist/* --target "$SOURCE_COMMIT" --prerelease --latest=false --title "OpenSurge Ubuntu 24.04 amd64 · IPv4 preview $tag" --notes-file packaging/linux/RELEASE-NOTES.md
+          if [[ "$tag" == v0.3.4-ubuntu.2 ]] && gh release view v0.3.4-ubuntu.1 --json body --jq .body > previous-notes.md; then
+            { printf '此包已由 [%s](https://github.com/%s/releases/tag/%s) 替代。新版本修复下载文件名与 SHA256 清单不一致的问题，请下载新版。\n\n' "$tag" "$GH_REPO" "$tag"; cat previous-notes.md; } > superseded-notes.md
+            gh release edit v0.3.4-ubuntu.1 --notes-file superseded-notes.md
+          fi

@@ -2,7 +2,10 @@ package routing
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/x509"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -25,7 +28,18 @@ func ProbeNode(ctx context.Context, binary string, node map[string]any, target i
 	return probeNodeWithServiceTrust(ctx, binary, node, target, chatGPTTLSHosts, nil)
 }
 
-func probeNodeWithServiceTrust(ctx context.Context, binary string, node map[string]any, target int, hosts []string, roots *x509.CertPool) (ProbeResult, error) {
+type ProbeNetwork struct {
+	Interface string
+	Resolvers []string
+}
+
+// Bind probes to the physical uplink so a failed live outlet cannot capture
+// the traffic intended to verify its replacement. This changes no host routes.
+func ProbeNodeWithNetwork(ctx context.Context, binary string, node map[string]any, target int, network ProbeNetwork) (ProbeResult, error) {
+	return probeNodeWithServiceTrust(ctx, binary, node, target, chatGPTTLSHosts, nil, network)
+}
+
+func probeNodeWithServiceTrust(ctx context.Context, binary string, node map[string]any, target int, hosts []string, roots *x509.CertPool, networks ...ProbeNetwork) (ProbeResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, 12*time.Second)
 	defer cancel()
 	dir, err := os.MkdirTemp("", "opensurge-isolated-probe-")
@@ -39,6 +53,20 @@ func probeNodeWithServiceTrust(ctx context.Context, binary string, node map[stri
 	}
 	port := listener.Addr().(*net.TCPAddr).Port
 	_ = listener.Close()
+	apiPort := port
+	for apiPort == port {
+		l, e := net.Listen("tcp4", "127.0.0.1:0")
+		if e != nil {
+			return ProbeResult{}, e
+		}
+		apiPort = l.Addr().(*net.TCPAddr).Port
+		_ = l.Close()
+	}
+	secretBytes := make([]byte, 24)
+	if _, err := rand.Read(secretBytes); err != nil {
+		return ProbeResult{}, err
+	}
+	secret := hex.EncodeToString(secretBytes)
 	name, _ := node["name"].(string)
 	if name == "" {
 		return ProbeResult{}, fmt.Errorf("node name missing")
@@ -47,6 +75,22 @@ func probeNodeWithServiceTrust(ctx context.Context, binary string, node map[stri
 		return ProbeResult{}, fmt.Errorf("unresolved probe dependency")
 	}
 	doc := map[string]any{"mixed-port": port, "bind-address": "127.0.0.1", "allow-lan": false, "mode": "rule", "log-level": "silent", "ipv6": false, "tun": map[string]any{"enable": false}, "proxies": []any{node}, "rules": []string{"MATCH," + name}, "dns": map[string]any{"enable": true, "nameserver": []string{"1.1.1.1", "8.8.8.8"}, "proxy-server-nameserver": []string{"1.1.1.1", "8.8.8.8"}}}
+	if len(networks) > 0 {
+		n := networks[0]
+		if n.Interface != "" {
+			if _, err := net.InterfaceByName(n.Interface); err != nil {
+				return ProbeResult{}, fmt.Errorf("probe physical interface unavailable")
+			}
+			if specified, _ := node["interface-name"].(string); specified != "" && specified != n.Interface {
+				return ProbeResult{}, fmt.Errorf("unresolved probe interface dependency")
+			}
+			doc["interface-name"] = n.Interface
+		}
+		if len(n.Resolvers) > 0 {
+			doc["dns"] = map[string]any{"enable": true, "nameserver": n.Resolvers, "proxy-server-nameserver": n.Resolvers}
+		}
+	}
+	doc["external-controller"], doc["secret"] = fmt.Sprintf("127.0.0.1:%d", apiPort), secret
 	data, err := yaml.Marshal(doc)
 	if err != nil {
 		return ProbeResult{}, fmt.Errorf("cannot compose isolated probe")
@@ -63,13 +107,45 @@ func probeNodeWithServiceTrust(ctx context.Context, binary string, node map[stri
 	}
 	defer func() { _ = cmd.Process.Kill(); _ = cmd.Wait() }()
 	address := fmt.Sprintf("127.0.0.1:%d", port)
+	readyTransport := &http.Transport{Proxy: nil}
+	defer readyTransport.CloseIdleConnections()
+	readyClient := &http.Client{Transport: readyTransport, Timeout: 200 * time.Millisecond}
 	ready := false
 	for i := 0; i < 100; i++ {
-		conn, err := net.DialTimeout("tcp4", address, 20*time.Millisecond)
-		if err == nil {
-			_ = conn.Close()
-			ready = true
-			break
+		// A listening mixed port can precede the loaded proxy graph. Confirm
+		// the intended node before treating a transport/TLS failure as evidence.
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("http://127.0.0.1:%d/proxies/", apiPort)+url.PathEscape(name), nil)
+		req.Header.Set("Authorization", "Bearer "+secret)
+		if response, e := readyClient.Do(req); e == nil {
+			_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
+			_ = response.Body.Close()
+			if response.StatusCode == http.StatusOK {
+				// Proxy inventory is published before routing rules. Without this
+				// second fence the first TLS request can hit an incomplete graph.
+				rulesRequest, _ := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("http://127.0.0.1:%d/rules", apiPort), nil)
+				rulesRequest.Header.Set("Authorization", "Bearer "+secret)
+				rulesReady := false
+				if rulesResponse, err := readyClient.Do(rulesRequest); err == nil {
+					var data struct {
+						Rules []struct{ Type, Proxy string } `json:"rules"`
+					}
+					if rulesResponse.StatusCode == 200 && json.NewDecoder(io.LimitReader(rulesResponse.Body, 65536)).Decode(&data) == nil {
+						for _, r := range data.Rules {
+							if strings.EqualFold(r.Type, "match") && r.Proxy == name {
+								rulesReady = true
+							}
+						}
+					}
+					_ = rulesResponse.Body.Close()
+				}
+				if conn, e := net.DialTimeout("tcp4", address, 20*time.Millisecond); e == nil {
+					_ = conn.Close()
+					if rulesReady {
+						ready = true
+						break
+					}
+				}
+			}
 		}
 		select {
 		case <-ctx.Done():
@@ -91,6 +167,12 @@ func probeNodeWithServiceTrust(ctx context.Context, binary string, node map[stri
 	if target == 1 {
 		testURL = "https://www.gstatic.com/generate_204"
 	}
+	if target == 3 {
+		testURL = "https://www.baidu.com/"
+	}
+	if target == 4 {
+		testURL = "https://www.qq.com/"
+	}
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, testURL, nil)
 	start := time.Now()
 	resp, err := client.Do(req)
@@ -98,6 +180,9 @@ func probeNodeWithServiceTrust(ctx context.Context, binary string, node map[stri
 		return ProbeResult{}, nil
 	}
 	defer resp.Body.Close()
+	if target == 3 || target == 4 {
+		return ProbeResult{Reachable: resp.StatusCode >= 200 && resp.StatusCode < 400, DelayMS: int(time.Since(start).Milliseconds())}, nil
+	}
 	data, err = io.ReadAll(io.LimitReader(resp.Body, 8193))
 	if err != nil || len(data) > 8192 {
 		return ProbeResult{}, nil

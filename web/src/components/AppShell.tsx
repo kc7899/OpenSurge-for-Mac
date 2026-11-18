@@ -5,6 +5,7 @@ import { t } from '../i18n'
 import { StatusDot } from './Common'
 
 type AppShellProps<Page extends string> = {
+  platform?: string
   page: Page
   nav: ReadonlyArray<{ id: Page; label: string; icon: string }>
   status: string
@@ -16,7 +17,7 @@ type AppShellProps<Page extends string> = {
 }
 
 // Drawer state stays here so opening it does not render the active page again.
-export function AppShell<Page extends string>({ page, nav, status, statusLabel, onNavigate, footer, overlays, children }: AppShellProps<Page>) {
+export function AppShell<Page extends string>({ platform, page, nav, status, statusLabel, onNavigate, footer, overlays, children }: AppShellProps<Page>) {
   const desktop = isDesktop()
   const compact = useCompactLayout() && !desktop
   const [open, setOpen] = useState(false)
@@ -62,7 +63,7 @@ export function AppShell<Page extends string>({ page, nav, status, statusLabel, 
     {compact && open && <div className="mobile-nav-backdrop" aria-hidden="true" onClick={() => setOpen(false)} />}
     <aside className="sidebar" id="app-navigation" ref={navigationRef} hidden={compact && !open} role={compact ? 'dialog' : undefined} aria-modal={compact && open ? true : undefined} aria-label={compact ? t('页面导航') : undefined}>
       {compact && <button type="button" className="mobile-nav-close" aria-label={t('关闭导航')} onClick={() => setOpen(false)}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><path d="m6 6 12 12M6 18 18 6" /></svg></button>}
-      <div className="brand"><img className="brand-mark" src="/opensurge-icon.png" alt="" aria-hidden="true" /><div><strong>OpenSurge</strong><small>for Mac</small></div></div>
+      <div className="brand"><img className="brand-mark" src="/opensurge-icon.png" alt="" aria-hidden="true" /><div><strong>OpenSurge</strong><small>{platform === 'linux' ? 'for Ubuntu · preview' : 'for Mac'}</small></div></div>
       <nav aria-label="OpenSurge sections">
         {nav.map(item => <button key={item.id} className={page === item.id ? 'active' : ''} aria-current={page === item.id ? 'page' : undefined} onClick={() => {
           if (!onNavigate(item.id)) return

@@ -1,0 +1,13 @@
+#!/bin/sh
+set -eu
+case "$1" in
+ remove|purge)
+  opensurge_apparmor remove
+  if [ -d /run/systemd/system ]; then
+   systemctl disable opensurge-control.service opensurge-helper.service || true
+   systemctl daemon-reload
+  fi
+  # Subscription and recovery data are intentionally retained, even on purge.
+  echo 'OpenSurge data retained under /var/lib/opensurge. Delete it manually only after verifying recovery.'
+ ;;
+esac

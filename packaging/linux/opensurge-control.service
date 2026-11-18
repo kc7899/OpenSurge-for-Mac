@@ -1,0 +1,25 @@
+[Unit]
+Description=OpenSurge Web console and stable routing controller
+After=opensurge-helper.service
+Requires=opensurge-helper.service
+ConditionPathExists=/var/lib/opensurge/config.yaml
+
+[Service]
+Type=simple
+User=opensurge
+Group=opensurge
+UMask=0077
+WorkingDirectory=/var/lib/opensurge/control
+Environment=HOME=/var/lib/opensurge/control
+ExecStart=/usr/lib/opensurge/opensurge-control --config /var/lib/opensurge/config.yaml --store /var/lib/opensurge/control --addr 127.0.0.1:61767 --browser-origin http://127.0.0.1:16167 --helper-socket /run/opensurge/helper.sock --quiet-bootstrap
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/opensurge/control
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+
+[Install]
+WantedBy=multi-user.target

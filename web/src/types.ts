@@ -181,6 +181,7 @@ export type TailscaleDiscoveryResponse = {
 }
 
 export type Overview = {
+  platform?: string
   presentation?: GatewayPresentation
   schema_version: number
   revision: string

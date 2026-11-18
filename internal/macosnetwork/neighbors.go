@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	goruntime "runtime"
 	"strings"
 )
 
@@ -17,6 +18,9 @@ type Neighbor struct {
 }
 
 func DiscoverNeighbors(ctx context.Context, interfaceName string) ([]Neighbor, error) {
+	if goruntime.GOOS == "linux" {
+		return linuxNeighbors(ctx, interfaceName)
+	}
 	interfaceName = strings.TrimSpace(interfaceName)
 	if interfaceName == "" {
 		return nil, fmt.Errorf("interface is required")

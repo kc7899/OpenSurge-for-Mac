@@ -10,6 +10,7 @@
 - 研发分支：`development/stable-gateway`。
 - 已提供 0.3.4-rc.4 arm64 本地研发预览安装包，已接通稳定选线后台、共享界面、订阅节点池热更新；rc.3 补齐动态池原名与实际检测接口，rc.4 接入经确认的 ChatGPT 证书异常自动避障；整套功能尚未完成，未创建正式 GitHub Release。实际范围见 [研发进度](docs/agent-wiki/sources/stable-development-progress.md)。
 - 旧实验实现不整体迁入；兼容修复、UI 和测试经逐项审查后分别迁移。
+- Ubuntu 移植独立于 Mac 分支：`development/ubuntu-gateway`，Ubuntu Server 24.04 amd64、IPv4 同 LAN 旁路由、后台服务 + Web。实现与实际验收边界见 [Ubuntu 进度](docs/agent-wiki/sources/ubuntu-development.md)，安装见 [Ubuntu 安装说明](docs/ubuntu-install.md)；不将原待实现方案视为 Linux 已完成能力。
 
 ## 本轮范围
 

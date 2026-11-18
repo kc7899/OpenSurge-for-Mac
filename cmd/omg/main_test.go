@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"testing"
 	"time"
@@ -64,9 +65,13 @@ mihomo:
 		t.Fatalf("run() exit = %d, output:\n%s", exitCode, output)
 	}
 
+	allowLAN, unwantedLAN := "allow-lan: true", "allow-lan: false"
+	if goruntime.GOOS == "linux" {
+		allowLAN, unwantedLAN = unwantedLAN, allowLAN
+	}
 	for _, want := range []string{
 		"mixed-port: 17890",
-		"allow-lan: true",
+		allowLAN,
 		"external-controller: 127.0.0.1:19090",
 		"proxies:",
 		"- DOMAIN-SUFFIX,example.com,Proxy",
@@ -75,7 +80,7 @@ mihomo:
 			t.Fatalf("render-mihomo output missing %q:\n%s", want, output)
 		}
 	}
-	if strings.Contains(output, "allow-lan: false") || strings.Contains(output, "dns:\n  enable: false") {
+	if strings.Contains(output, unwantedLAN) || strings.Contains(output, "dns:\n  enable: false") {
 		t.Fatalf("render-mihomo output kept gateway-owned profile fields:\n%s", output)
 	}
 }

@@ -1,6 +1,7 @@
 package routing
 
 import (
+	"bufio"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -86,14 +87,23 @@ func testConnectProxy(t *testing.T, origin *httptest.Server) *httptest.Server {
 			return
 		}
 		defer remote.Close()
-		client, _, e := w.(http.Hijacker).Hijack()
+		client, buffered, e := w.(http.Hijacker).Hijack()
 		if e != nil {
 			return
 		}
 		defer client.Close()
 		_, _ = io.WriteString(client, "HTTP/1.1 200 Connection Established\r\n\r\n")
-		go func() { _, _ = io.Copy(remote, client); _ = remote.Close() }()
+		// Preserve any bytes buffered by net/http during CONNECT parsing and
+		// half-close the tunnel rather than discarding the opposite direction.
+		done := make(chan struct{})
+		go func() {
+			_, _ = io.Copy(remote, buffered)
+			_ = remote.(*net.TCPConn).CloseWrite()
+			close(done)
+		}()
 		_, _ = io.Copy(client, remote)
+		_ = client.(*net.TCPConn).CloseWrite()
+		<-done
 	}))
 	t.Cleanup(p.Close)
 	return p
@@ -121,6 +131,39 @@ func TestTLSProbeStrictValidationWithoutHTTP(t *testing.T) {
 	}
 }
 
+func TestConnectFixturePreservesBufferedTunnelBytes(t *testing.T) {
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, "tunnel-fixture")
+	}))
+	defer origin.Close()
+	proxy := testConnectProxy(t, origin)
+	conn, err := net.DialTimeout("tcp", proxy.Listener.Addr().String(), time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(time.Second))
+	// One write deliberately puts tunnel payload in net/http's CONNECT buffer.
+	_, err = io.WriteString(conn, "CONNECT fixture:80 HTTP/1.1\r\nHost: fixture:80\r\n\r\nGET / HTTP/1.1\r\nHost: fixture\r\nConnection: close\r\n\r\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader := bufio.NewReader(conn)
+	connect, err := http.ReadResponse(reader, &http.Request{Method: http.MethodConnect})
+	if err != nil || connect.StatusCode != 200 {
+		t.Fatalf("CONNECT failed: %v", err)
+	}
+	response, err := http.ReadResponse(reader, &http.Request{Method: http.MethodGet})
+	if err != nil {
+		t.Fatalf("buffered tunnel payload was lost: %v", err)
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil || string(body) != "tunnel-fixture" {
+		t.Fatalf("tunnel response: %q %v", body, err)
+	}
+}
+
 type tlsCoreSelector struct {
 	revision, base string
 	client         *http.Client
@@ -138,10 +181,16 @@ func (s *tlsCoreSelector) Current(ctx context.Context) (string, error) {
 		return "", e
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("selector not ready: %d", resp.StatusCode)
+	}
 	var g struct {
 		Now string `json:"now"`
 	}
 	e = json.NewDecoder(resp.Body).Decode(&g)
+	if e == nil && g.Now == "" {
+		e = fmt.Errorf("selector has no actual choice")
+	}
 	return g.Now, e
 }
 func (s *tlsCoreSelector) Select(ctx context.Context, id string) error {
@@ -244,11 +293,20 @@ func TestCertificateFailoverThroughRealIsolatedCore(t *testing.T) {
 	for _, n := range pool.Proxies {
 		nodes[n["name"].(string)] = n
 	}
+	var networks []ProbeNetwork
+	if os.Getenv("OPENSURGE_TEST_BIND_UPLINK") == "1" {
+		physical := "lo"
+		if _, err := net.InterfaceByName(physical); err != nil {
+			physical = "lo0"
+		}
+		networks = []ProbeNetwork{{Interface: physical}}
+	}
 	probe := func(ctx context.Context, c Candidate, target int) ProbeResult {
 		if target != 2 {
 			return ProbeResult{Reachable: true, Country: "US", IP: "203.0.113.1", DelayMS: 10}
 		}
-		r, e := probeNodeWithServiceTrust(ctx, binary, nodes[c.ID], target, chatGPTTLSHosts, roots)
+		r, e := probeNodeWithServiceTrust(ctx, binary, nodes[c.ID], target, chatGPTTLSHosts, roots, networks...)
+		t.Logf("fixture %s: reachable=%t, host=%s, certificate=%s, infrastructure=%v, transport=%v", c.Name, r.Reachable, r.ServiceHost, r.CertificateError, e, r.transportError)
 		if e != nil {
 			return ProbeResult{InfrastructureError: true}
 		}

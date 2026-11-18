@@ -240,8 +240,20 @@ func (s *Server) stableCycle(ctx context.Context, p routing.Policy, revision str
 		sources[i].Quota = q
 	}
 	upstream := s.stable.upstream
+	probeRunner, _ := s.runner.(stableProbeRunner)
 	if upstream == nil {
-		upstream = stableUpstreamReady
+		upstream = func(ctx context.Context) bool {
+			if probeRunner == nil {
+				return false
+			}
+			for _, target := range []int{3, 4} {
+				result, err := probeRunner.ProbeStable(ctx, s.configPath, StableProbeInput{Target: target})
+				if err == nil && result.Reachable {
+					return true
+				}
+			}
+			return false
+		}
 	}
 	networkReady := upstream(ctx)
 	snapshot := routing.Snapshot{Version: version, Current: current, Sources: sources, Candidates: graph.Candidates, Observations: previous.Observations, NetworkReady: networkReady, ScanComplete: false}
@@ -253,7 +265,10 @@ func (s *Server) stableCycle(ctx context.Context, p routing.Policy, revision str
 		if node == nil {
 			return routing.ProbeResult{InfrastructureError: true}
 		}
-		result, err := routing.ProbeNode(probeCtx, cfg.Mihomo.Binary, node, target)
+		if probeRunner == nil {
+			return routing.ProbeResult{InfrastructureError: true}
+		}
+		result, err := probeRunner.ProbeStable(probeCtx, s.configPath, StableProbeInput{CandidateID: c.ID, Target: target})
 		if err != nil {
 			return routing.ProbeResult{InfrastructureError: true}
 		}
@@ -343,20 +358,4 @@ func (s *Server) stableQuota(ctx context.Context, id string) routing.Quota {
 		return unknown
 	}
 	return routing.ParseQuota(resp.Header.Get("subscription-userinfo"), time.Now())
-}
-func stableUpstreamReady(ctx context.Context) bool {
-	transport := &http.Transport{}
-	defer transport.CloseIdleConnections()
-	client := &http.Client{Transport: transport, Timeout: 3 * time.Second}
-	for _, target := range []string{"https://www.baidu.com/", "https://www.qq.com/"} {
-		req, _ := http.NewRequestWithContext(ctx, http.MethodHead, target, nil)
-		resp, err := client.Do(req)
-		if err == nil {
-			_ = resp.Body.Close()
-			if resp.StatusCode >= 200 && resp.StatusCode < 400 {
-				return true
-			}
-		}
-	}
-	return false
 }

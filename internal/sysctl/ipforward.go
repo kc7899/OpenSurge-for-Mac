@@ -8,9 +8,7 @@ import (
 	"open-mihomo-gateway/internal/process"
 )
 
-const keyIPForwarding = "net.inet.ip.forwarding"
-
-type Manager struct{}
+type Manager struct{ interfaceName string }
 
 func New() Manager {
 	return Manager{}
@@ -24,7 +22,11 @@ func (m Manager) Check() error {
 }
 
 func (m Manager) Current() (string, error) {
-	out, err := process.Output("sysctl", "-n", keyIPForwarding)
+	key, err := m.forwardingKey()
+	if err != nil {
+		return "", err
+	}
+	out, err := process.Output("sysctl", "-n", key)
 	if err != nil {
 		return "", err
 	}
@@ -32,7 +34,7 @@ func (m Manager) Current() (string, error) {
 }
 
 func (m Manager) Enable() error {
-	return setIPForwarding("1")
+	return m.setForwarding("1")
 }
 
 func (m Manager) Restore(previous string) error {
@@ -40,11 +42,30 @@ func (m Manager) Restore(previous string) error {
 	if previous == "" {
 		return nil
 	}
-	return setIPForwarding(previous)
+	return m.setForwarding(previous)
 }
 
-func setIPForwarding(value string) error {
-	return process.Run("sysctl", "-w", keyIPForwarding+"="+value)
+func (m Manager) forwardingKey() (string, error) {
+	if m.interfaceName == "" {
+		return keyIPForwarding, nil
+	}
+	if len(m.interfaceName) > 15 || m.interfaceName == "." || m.interfaceName == ".." || strings.ContainsAny(m.interfaceName, "/\x00\n\t ") {
+		return "", fmt.Errorf("invalid forwarding interface")
+	}
+	// Slash notation preserves literal dots in interface names. Setting only
+	// this inbound interface avoids ip_forward's global configuration resets.
+	return "net/ipv4/conf/" + m.interfaceName + "/forwarding", nil
+}
+
+func (m Manager) setForwarding(value string) error {
+	if value != "0" && value != "1" {
+		return fmt.Errorf("invalid forwarding backup value")
+	}
+	key, err := m.forwardingKey()
+	if err != nil {
+		return err
+	}
+	return process.Run("sysctl", "-w", key+"="+value)
 }
 
 func FormatForwarding(value string) string {

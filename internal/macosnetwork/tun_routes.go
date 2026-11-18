@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/netip"
+	goruntime "runtime"
 	"strings"
 
 	"open-mihomo-gateway/internal/config"
@@ -16,6 +17,9 @@ type RouteSelection struct {
 }
 
 func LookupRoute(ctx context.Context, destination string) (RouteSelection, error) {
+	if goruntime.GOOS == "linux" {
+		return linuxRoute(ctx, destination)
+	}
 	args := []string{"-n", "get"}
 	if addr, err := netip.ParseAddr(destination); err == nil && addr.Is6() {
 		args = append(args, "-inet6")
@@ -35,6 +39,9 @@ func LookupRoute(ctx context.Context, destination string) (RouteSelection, error
 // When host IPv6 is enabled, also check both ends of the synthetic /64 and
 // a public IPv6 destination. Disabled IPv6 must not block IPv4 readiness.
 func VerifyMacTUNRoutes(ctx context.Context, device string, ipv6 bool) error {
+	if goruntime.GOOS == "linux" {
+		return linuxVerifyTUN(ctx, device, ipv6)
+	}
 	if device == "" {
 		return fmt.Errorf("Mac TUN device is missing")
 	}

@@ -1,0 +1,4 @@
+# OpenSurge same-LAN IPv4 DNS runtime. No wildcard or directory-wide access.
+/var/lib/opensurge/runtime/dnsmasq.conf r,
+/var/lib/opensurge/runtime/dnsmasq.pid w,
+/var/lib/opensurge/runtime/logs/dnsmasq.log w,

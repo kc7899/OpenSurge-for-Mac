@@ -1,0 +1,11 @@
+#!/bin/sh
+set -eu
+case "$1" in
+ remove|upgrade|deconfigure)
+  if [ -d /run/systemd/system ]; then systemctl stop opensurge-control.service; fi
+  # Never replace a running core before its existing lifecycle has restored
+  # owned settings. Failure aborts removal/upgrade rather than hiding damage.
+  if [ -f /var/lib/opensurge/config.yaml ]; then /usr/lib/opensurge/omg stop --config /var/lib/opensurge/config.yaml; fi
+  if [ -d /run/systemd/system ]; then systemctl stop opensurge-helper.service; fi
+ ;;
+esac

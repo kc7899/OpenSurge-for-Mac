@@ -7,6 +7,8 @@ SOURCE_ARCHIVE="${SOURCE_ARCHIVE_OVERRIDE:-$ROOT/runtime/release-tools/cache/mih
 SOURCE_SHA256=ecda5f8c8a8a1d60bc088c2640c85d92c8f002c0686234a26bdf671735afe216
 SOURCE_URL=https://github.com/MetaCubeX/mihomo/archive/3f27ef39f8c96bbfbc8b0b9bb10f5c9ef60149d8.tar.gz
 OUTPUT="${OPENSURGE_MIHOMO_OUTPUT:-$ROOT/bin/mihomo}"
+TARGET_OS="${OPENSURGE_MIHOMO_OS:-darwin}"
+[[ "$TARGET_OS" == "darwin" || "$TARGET_OS" == "linux" ]] || { echo "unsupported target OS" >&2; exit 1; }
 TARGET_ARCH="${OPENSURGE_MIHOMO_ARCH:-$(uname -m)}"
 VERSION="${OPENSURGE_MIHOMO_VERSION:-1.19.33-opensurge.1}"
 GO_BIN="${GO_BIN:-$(command -v go || true)}"
@@ -44,7 +46,7 @@ if ! source_archive_valid; then
   source_archive_valid || { echo "downloaded mihomo source does not match the pinned SHA-256" >&2; exit 1; }
 fi
 
-work_dir="$(mktemp -d "${TMPDIR:-/private/tmp}/opensurge-mihomo.XXXXXX")"
+work_dir="$(mktemp -d "${TMPDIR:-/tmp}/opensurge-mihomo.XXXXXX")"
 trap 'rm -rf "$work_dir"' EXIT
 tar -xzf "$SOURCE_ARCHIVE" -C "$work_dir" --strip-components=1
 # Resolve the effective toolchain in the upstream module on both cache hits
@@ -52,7 +54,7 @@ tar -xzf "$SOURCE_ARCHIVE" -C "$work_dir" --strip-components=1
 cd "$work_dir"
 describe_inputs() {
   python3 "$CACHE_HELPER" describe --root "$ROOT" --source "$SOURCE_ARCHIVE" \
-    --go "$GO_BIN" --arch "$GO_ARCH" --version "$VERSION"
+    --go "$GO_BIN" --arch "$GO_ARCH" --os "$TARGET_OS" --version "$VERSION"
 }
 describe_inputs > "$work_dir/inputs.json"
 if python3 "$CACHE_HELPER" restore --manifest "$work_dir/inputs.json" \
@@ -69,7 +71,7 @@ build_output="$work_dir/mihomo-opensurge"
 
 # Native tests simulate an absent IPv6 uplink; no interfaces or routes are changed.
 "$GO_BIN" test -tags with_gvisor ./config -run '^TestOpenSurgeIPv6WithoutNativeUplink$' -count=1
-GOOS=darwin GOARCH="$GO_ARCH" CGO_ENABLED=0 \
+GOOS="$TARGET_OS" GOARCH="$GO_ARCH" CGO_ENABLED=0 \
   "$GO_BIN" build -tags with_gvisor -trimpath \
   -ldflags "-X github.com/metacubex/mihomo/constant.Version=$VERSION -w -s -buildid=" \
   -o "$build_output" .

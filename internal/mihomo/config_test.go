@@ -3,6 +3,7 @@ package mihomo
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -232,6 +233,10 @@ func TestRenderConfigUsesPersistedTailscaleIdentityWithoutAuthKey(t *testing.T) 
 }
 
 func TestRenderConfigWithImportedProfileOverlay(t *testing.T) {
+	allowLAN, bind, dnsListen, unwantedAllowLAN := "allow-lan: true", `bind-address: "*"`, "listen: 0.0.0.0:1053", "allow-lan: false"
+	if runtime.GOOS == "linux" {
+		allowLAN, bind, dnsListen, unwantedAllowLAN = "allow-lan: false", `bind-address: "127.0.0.1"`, "listen: 127.0.0.1:1053", "allow-lan: true"
+	}
 	dir := t.TempDir()
 	profilePath := filepath.Join(dir, "profile.yaml")
 	body := `allow-lan: false
@@ -286,10 +291,10 @@ tun:
 
 	for _, want := range []string{
 		"mixed-port: 17890",
-		"allow-lan: true",
-		"bind-address: \"*\"",
+		allowLAN,
+		bind,
 		"external-controller: 127.0.0.1:19090",
-		"listen: 0.0.0.0:1053",
+		dnsListen,
 		"ipv6: false",
 		"enhanced-mode: fake-ip",
 		"fake-ip-range: 198.18.0.1/16",
@@ -314,7 +319,7 @@ tun:
 		}
 	}
 	for _, notWant := range []string{
-		"allow-lan: false",
+		unwantedAllowLAN,
 		"external-controller: 127.0.0.1:9999",
 		"dns:\n  enable: false",
 		"tun:\n  enable: false",

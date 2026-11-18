@@ -448,3 +448,61 @@ func TestLANLoginAdmittedBeforeRebindCannotCreateSession(t *testing.T) {
 		t.Fatal("previous listener request created a new session")
 	}
 }
+
+func TestLANStableRoutingRequiresSession(t *testing.T) {
+	s, c := testLANController(t)
+	if r := configureLAN(t, s, true, testLANPassword); r.Code != 200 {
+		t.Fatalf("LAN setup: %d", r.Code)
+	}
+	path := "/api/v1/stable-routing"
+	if r := performLAN(c, "GET", path, "", nil, nil); r.Code != 401 {
+		t.Fatalf("anonymous request: %d", r.Code)
+	}
+	cookie := loginLAN(t, c)
+	if r := performLAN(c, "GET", path, "", cookie, nil); r.Code != 200 {
+		t.Fatalf("authenticated read: %d", r.Code)
+	}
+	if r := performLAN(c, "PUT", path, "{}", cookie, func(r *http.Request) {
+		r.Header.Del("Origin")
+	}); r.Code != 403 {
+		t.Fatalf("missing origin: %d", r.Code)
+	}
+	if r := performLAN(c, "PUT", path, "{}", cookie, nil); r.Code != 409 {
+		t.Fatalf("write without revision: %d", r.Code)
+	}
+	if r := performLAN(c, "POST", path+"/check", "{}", cookie, nil); r.Code != 202 {
+		t.Fatalf("check: %d", r.Code)
+	}
+	for _, endpoint := range []struct{ method, path string }{{"PUT", path}, {"POST", path + "/check"}} {
+		if r := performLAN(c, endpoint.method, endpoint.path, "{}", nil, nil); r.Code != 401 {
+			t.Fatalf("anonymous %s %s: %d", endpoint.method, endpoint.path, r.Code)
+		}
+		if r := performLAN(c, endpoint.method, endpoint.path, "{}", cookie, func(r *http.Request) {
+			r.Header.Set("Origin", "https://untrusted.example")
+		}); r.Code != 403 {
+			t.Fatalf("cross origin %s: %d", endpoint.method, r.Code)
+		}
+	}
+	get := performLAN(c, "GET", path, "", cookie, nil)
+	var view stableSettingsResponse
+	if err := json.Unmarshal(get.Body.Bytes(), &view); err != nil {
+		t.Fatal(err)
+	}
+	view.Policy.HealthSeconds = 120
+	body, _ := json.Marshal(view.Policy)
+	put := performLAN(c, "PUT", path, string(body), cookie, func(r *http.Request) {
+		r.Header.Set("If-Match", get.Header().Get("ETag"))
+	})
+	if put.Code != 200 {
+		t.Fatalf("revisioned LAN save: %d %s", put.Code, put.Body.String())
+	}
+	local := performAuthorized(s, "GET", path, nil)
+	if local.Code != 200 || !strings.Contains(local.Body.String(), `"health_seconds":120`) {
+		t.Fatalf("local and LAN do not share saved settings: %d %s", local.Code, local.Body.String())
+	}
+	if r := performLAN(c, "PUT", path, string(body), cookie, func(r *http.Request) {
+		r.Header.Set("If-Match", get.Header().Get("ETag"))
+	}); r.Code != 409 {
+		t.Fatalf("stale revision accepted: %d", r.Code)
+	}
+}

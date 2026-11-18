@@ -13,6 +13,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -32,6 +33,7 @@ import (
 type Options struct {
 	ConfigPath        string
 	Addr              string
+	BrowserOrigin     string // Explicit loopback SSH-forward origin; not a wildcard.
 	StoreDir          string
 	Runner            ActionRunner
 	NetworkRunner     NetworkRunner
@@ -121,6 +123,14 @@ func New(options Options) (*Server, error) {
 	host, _, err := net.SplitHostPort(options.Addr)
 	if err != nil || (host != "127.0.0.1" && host != "localhost") {
 		return nil, fmt.Errorf("control API must listen on loopback IPv4")
+	}
+	baseURL := "http://" + options.Addr
+	if options.BrowserOrigin != "" {
+		u, err := url.Parse(options.BrowserOrigin)
+		if err != nil || u.Scheme != "http" || u.Hostname() != "127.0.0.1" || u.Port() == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" {
+			return nil, fmt.Errorf("browser origin must be an exact http://127.0.0.1:PORT origin")
+		}
+		baseURL = options.BrowserOrigin
 	}
 	if options.StoreDir == "" {
 		home, err := os.UserHomeDir()
@@ -251,7 +261,7 @@ func New(options Options) (*Server, error) {
 		mihomoRecovery:  newMihomoRecoveryController(),
 		sleepPrevention: newSleepPreventionController(options.SleepRunner, configPath),
 		token:           token,
-		baseURL:         "http://" + options.Addr,
+		baseURL:         baseURL,
 		sessions:        map[string]time.Time{},
 		bootstraps:      map[string]bootstrapGrant{},
 	}
@@ -285,9 +295,6 @@ func (s *Server) routes(auth func(http.Handler) http.Handler, local bool) http.H
 			w.Header().Set("Cache-Control", "no-store")
 			writeJSON(w, http.StatusOK, map[string]string{"mode": "local"})
 		})
-		mux.Handle("POST /api/v1/stable-routing/check", auth(http.HandlerFunc(s.handleStableCheck)))
-		mux.Handle("GET /api/v1/stable-routing", auth(http.HandlerFunc(s.handleStableSettings)))
-		mux.Handle("PUT /api/v1/stable-routing", auth(http.HandlerFunc(s.handleStableSettings)))
 		mux.Handle("GET /api/v1/lan-access", auth(http.HandlerFunc(s.lan.handleConfig)))
 		mux.Handle("PUT /api/v1/lan-access", auth(http.HandlerFunc(s.lan.handleConfig)))
 		mux.Handle("POST /api/v1/lan-access/password", auth(http.HandlerFunc(s.lan.handleResetPassword)))
@@ -297,6 +304,9 @@ func (s *Server) routes(auth func(http.Handler) http.Handler, local bool) http.H
 		mux.HandleFunc("POST /api/v1/auth/logout", s.lan.handleLogout)
 		mux.Handle("POST /api/v1/auth/password", auth(http.HandlerFunc(s.lan.handleChangePassword)))
 	}
+	mux.Handle("POST /api/v1/stable-routing/check", auth(http.HandlerFunc(s.handleStableCheck)))
+	mux.Handle("GET /api/v1/stable-routing", auth(http.HandlerFunc(s.handleStableSettings)))
+	mux.Handle("PUT /api/v1/stable-routing", auth(http.HandlerFunc(s.handleStableSettings)))
 	mux.Handle("GET /api/v1/overview", auth(http.HandlerFunc(s.handleOverview)))
 	mux.Handle("GET /api/v1/config", auth(http.HandlerFunc(s.handleControlConfig)))
 	mux.Handle("PUT /api/v1/config", auth(http.HandlerFunc(s.handleControlConfig)))
@@ -709,6 +719,7 @@ func (s *Server) readOverview(ctx context.Context, inventory bool) (Overview, er
 		warnings = append(warnings, "gateway runtime was interrupted by a system reboot; stop to clean stale state before starting again")
 	}
 	return Overview{
+		Platform:             hostPlatform(),
 		Presentation:         presentation,
 		SchemaVersion:        SchemaVersion,
 		Revision:             revision,
